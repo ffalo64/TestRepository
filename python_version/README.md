@@ -16,6 +16,7 @@
 
 - Python 3.10以降
 - tkinter（通常Pythonに含まれています）
+- Pillow（画像処理ライブラリ）
 
 ## インストール
 
@@ -26,6 +27,11 @@ cd TestRepository/python_version
 
 # Pythonのバージョン確認
 python --version  # Python 3.10以降であることを確認
+
+# 依存パッケージのインストール
+pip install -r requirements.txt
+# または
+pip install Pillow
 ```
 
 ## 起動方法

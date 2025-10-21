@@ -4,6 +4,8 @@ tkinterベースのグラフィカルユーザーインターフェース
 """
 import tkinter as tk
 from tkinter import font as tkfont
+from PIL import Image, ImageTk
+import os
 from game_logic import GameLogic
 from ability_system import AbilitySystem
 from constants import (
@@ -43,6 +45,10 @@ class DungeonGameGUI:
         self.font = tkfont.Font(family="Meiryo", size=12, weight="bold")
         self.small_font = tkfont.Font(family="Meiryo", size=10)
 
+        # 画像読み込み
+        self.images = {}
+        self._load_images()
+
         # メッセージバッファ
         self.messages: list[tuple[str, int]] = []  # (message, ttl)
 
@@ -54,6 +60,72 @@ class DungeonGameGUI:
 
         # メインループ
         self.update_game()
+
+    def _load_images(self):
+        """画像ファイルを読み込む"""
+        # プロジェクトルートからの相対パス
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        image_dir = os.path.join(base_path, "Images")
+
+        try:
+            # プレイヤー画像 (20x50 = 5状態 x 10px)
+            player_img = Image.open(os.path.join(image_dir, "Player.bmp"))
+            self.images['player'] = ImageTk.PhotoImage(player_img)
+            self.images['player_pil'] = player_img
+
+            # モンスター画像 (20x50 = 5種類 x 10px)
+            monster_img = Image.open(os.path.join(image_dir, "Monster.bmp"))
+            self.images['monster'] = ImageTk.PhotoImage(monster_img)
+            self.images['monster_pil'] = monster_img
+
+            # 箱画像 (20x60 = 6種類 x 10px: 青/赤/黄/緑/紫/階段)
+            box_img = Image.open(os.path.join(image_dir, "Box.bmp"))
+            self.images['box'] = ImageTk.PhotoImage(box_img)
+            self.images['box_pil'] = box_img
+
+            # 部屋画像 (20x100 = 10種類 x 10px)
+            room_img = Image.open(os.path.join(image_dir, "Room.bmp"))
+            self.images['room'] = ImageTk.PhotoImage(room_img)
+            self.images['room_pil'] = room_img
+
+            # 壁画像 (20x100 = 10種類 x 10px)
+            wall_img = Image.open(os.path.join(image_dir, "Wall.bmp"))
+            self.images['wall'] = ImageTk.PhotoImage(wall_img)
+            self.images['wall_pil'] = wall_img
+
+            # HPバー画像
+            hpbar_img = Image.open(os.path.join(image_dir, "HpBar.bmp"))
+            self.images['hpbar'] = ImageTk.PhotoImage(hpbar_img)
+            self.images['hpbar_pil'] = hpbar_img
+
+            print("画像の読み込みに成功しました")
+
+        except Exception as e:
+            print(f"警告: 画像の読み込みに失敗しました: {e}")
+            print("代わりに色付き図形を使用します")
+            self.images = {}  # 画像なしモード
+
+    def _get_sprite(self, image_name: str, index: int) -> ImageTk.PhotoImage | None:
+        """
+        スプライトシートから特定のスプライトを切り出す
+        Args:
+            image_name: 画像名 ('player', 'monster', 'box', 'room', 'wall')
+            index: スプライトのインデックス（縦方向の位置）
+        """
+        if f'{image_name}_pil' not in self.images:
+            return None
+
+        pil_img = self.images[f'{image_name}_pil']
+
+        # VB6では横20ピクセル（左10px=マスク、右10px=実画像）
+        # 実画像部分（右側10px）を切り出す
+        try:
+            # 右側10pxを切り出し: x座標10から20まで
+            sprite = pil_img.crop((10, index * SC, 20, (index + 1) * SC))
+            return ImageTk.PhotoImage(sprite)
+        except Exception as e:
+            print(f"スプライト切り出しエラー: {e}")
+            return None
 
     def on_key_press(self, event):
         """キー押下イベント"""
@@ -138,6 +210,8 @@ class DungeonGameGUI:
     def render(self):
         """画面を描画"""
         self.canvas.delete("all")
+        # 画像参照をクリア（前フレームの画像を解放）
+        self.canvas._image_refs = []
 
         mode = self.game.game_state.game_mode
 
@@ -205,40 +279,52 @@ class DungeonGameGUI:
         """ダンジョン画面を描画"""
         # マップ領域: 左側 400x400
         map_size = LAND_NUMBER * SC
+        floor_variant = (self.game.game_state.floor % 200) // 20  # 壁と部屋のバリエーション
 
         # タイルを描画
         for i in range(LAND_NUMBER):
             for j in range(LAND_NUMBER):
                 square = self.game.map_gen.land_squares[i][j]
-                color = self._get_tile_color(square.condition)
 
-                self.canvas.create_rectangle(
-                    square.left, square.top,
-                    square.left + SC, square.top + SC,
-                    fill=color,
-                    outline=''
-                )
+                # 画像がある場合は画像を使用
+                if self.images:
+                    self._draw_tile_sprite(square, floor_variant)
+                else:
+                    # 画像がない場合は色で描画
+                    color = self._get_tile_color(square.condition)
+                    self.canvas.create_rectangle(
+                        square.left, square.top,
+                        square.left + SC, square.top + SC,
+                        fill=color,
+                        outline=''
+                    )
 
         # プレイヤーを描画
         if self.game.player.alive:
-            player_color = self._get_player_color()
-            self.canvas.create_oval(
-                self.game.player.left + 2, self.game.player.top + 2,
-                self.game.player.left + SC - 2, self.game.player.top + SC - 2,
-                fill=player_color,
-                outline='white'
-            )
+            if self.images:
+                self._draw_player_sprite()
+            else:
+                player_color = self._get_player_color()
+                self.canvas.create_oval(
+                    self.game.player.left + 2, self.game.player.top + 2,
+                    self.game.player.left + SC - 2, self.game.player.top + SC - 2,
+                    fill=player_color,
+                    outline='white'
+                )
 
         # モンスターを描画
         for monster in self.game.monsters:
             if monster.alive:
-                monster_color = self._get_monster_color(monster.ability)
-                self.canvas.create_rectangle(
-                    monster.left + 2, monster.top + 2,
-                    monster.left + SC - 2, monster.top + SC - 2,
-                    fill=monster_color,
-                    outline='red'
-                )
+                if self.images:
+                    self._draw_monster_sprite(monster)
+                else:
+                    monster_color = self._get_monster_color(monster.ability)
+                    self.canvas.create_rectangle(
+                        monster.left + 2, monster.top + 2,
+                        monster.left + SC - 2, monster.top + SC - 2,
+                        fill=monster_color,
+                        outline='red'
+                    )
 
         # ステータスバー (下部)
         status_y = map_size + 10
@@ -370,6 +456,75 @@ class DungeonGameGUI:
 
         # 背景を元に戻す
         self.root.after(100, lambda: self.canvas.config(bg='black'))
+
+    def _draw_tile_sprite(self, square, floor_variant: int):
+        """タイルのスプライトを描画"""
+        if square.condition == TileType.WALL:
+            # 壁
+            sprite = self._get_sprite('wall', floor_variant)
+            if sprite:
+                self.canvas.create_image(
+                    square.left, square.top,
+                    image=sprite,
+                    anchor=tk.NW
+                )
+                # 画像の参照を保持（ガベージコレクション防止）
+                self.canvas._image_refs = getattr(self.canvas, '_image_refs', [])
+                self.canvas._image_refs.append(sprite)
+
+        elif square.condition == TileType.ROOM or square.condition == TileType.ENEMY:
+            # 部屋
+            sprite = self._get_sprite('room', floor_variant)
+            if sprite:
+                self.canvas.create_image(
+                    square.left, square.top,
+                    image=sprite,
+                    anchor=tk.NW
+                )
+                self.canvas._image_refs = getattr(self.canvas, '_image_refs', [])
+                self.canvas._image_refs.append(sprite)
+
+        elif square.condition <= TileType.STAIR:
+            # 箱または階段
+            sprite = self._get_sprite('box', int(square.condition))
+            if sprite:
+                self.canvas.create_image(
+                    square.left, square.top,
+                    image=sprite,
+                    anchor=tk.NW
+                )
+                self.canvas._image_refs = getattr(self.canvas, '_image_refs', [])
+                self.canvas._image_refs.append(sprite)
+
+    def _draw_player_sprite(self):
+        """プレイヤーのスプライトを描画"""
+        # プレイヤーの状態に応じたスプライトインデックス
+        sprite_index = int(self.game.player.condition)
+        sprite = self._get_sprite('player', sprite_index)
+
+        if sprite:
+            self.canvas.create_image(
+                self.game.player.left, self.game.player.top,
+                image=sprite,
+                anchor=tk.NW
+            )
+            self.canvas._image_refs = getattr(self.canvas, '_image_refs', [])
+            self.canvas._image_refs.append(sprite)
+
+    def _draw_monster_sprite(self, monster):
+        """モンスターのスプライトを描画"""
+        # モンスターのアビリティに応じたスプライトインデックス
+        sprite_index = int(monster.ability)
+        sprite = self._get_sprite('monster', sprite_index)
+
+        if sprite:
+            self.canvas.create_image(
+                monster.left, monster.top,
+                image=sprite,
+                anchor=tk.NW
+            )
+            self.canvas._image_refs = getattr(self.canvas, '_image_refs', [])
+            self.canvas._image_refs.append(sprite)
 
     def _get_tile_color(self, tile_type: TileType) -> str:
         """タイルの色を取得"""
