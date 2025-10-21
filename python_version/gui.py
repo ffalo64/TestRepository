@@ -107,7 +107,8 @@ class DungeonGameGUI:
 
     def _get_sprite(self, image_name: str, index: int) -> ImageTk.PhotoImage | None:
         """
-        スプライトシートから特定のスプライトを切り出す
+        スプライトシートから特定のスプライトを切り出す（透過処理付き）
+        VB6のBitBlt（vbSrcAnd + vbSrcPaint）を再現
         Args:
             image_name: 画像名 ('player', 'monster', 'box', 'room', 'wall')
             index: スプライトのインデックス（縦方向の位置）
@@ -118,13 +119,54 @@ class DungeonGameGUI:
         pil_img = self.images[f'{image_name}_pil']
 
         # VB6では横20ピクセル（左10px=マスク、右10px=実画像）
-        # 実画像部分（右側10px）を切り出す
+        # BitBltのAND/OR演算を再現して透過処理を行う
         try:
-            # 右側10pxを切り出し: x座標10から20まで
-            sprite = pil_img.crop((10, index * SC, 20, (index + 1) * SC))
-            return ImageTk.PhotoImage(sprite)
+            # 左10px: マスク（黒=透明、白=不透明）
+            mask_img = pil_img.crop((0, index * SC, SC, (index + 1) * SC))
+
+            # 右10px: 実画像
+            sprite_img = pil_img.crop((10, index * SC, 20, (index + 1) * SC))
+
+            # RGBAモードに変換
+            if sprite_img.mode != 'RGBA':
+                sprite_img = sprite_img.convert('RGBA')
+
+            # マスクをグレースケールに変換
+            if mask_img.mode != 'L':
+                mask_img = mask_img.convert('L')
+
+            # VB6のBitBltではマスクの黒い部分(0)が透明
+            # Pillowのアルファチャンネルでは255=不透明、0=透明
+            # そのため、マスクを反転する必要がある
+            from PIL import ImageOps
+            mask_inverted = ImageOps.invert(mask_img)
+
+            # スプライト画像のピクセルデータを取得してアルファチャンネルを作成
+            sprite_data = sprite_img.getdata()
+            mask_data = list(mask_inverted.getdata())
+
+            # 新しいピクセルデータ（RGBA）
+            new_data = []
+            for i, pixel in enumerate(sprite_data):
+                r, g, b = pixel[:3] if len(pixel) >= 3 else (pixel[0], pixel[0], pixel[0])
+
+                # マスクのアルファ値を取得
+                alpha = mask_data[i]
+
+                # 実画像が黒(0,0,0)の場合も透明にする（背景色）
+                if r == 0 and g == 0 and b == 0:
+                    alpha = 0
+
+                new_data.append((r, g, b, alpha))
+
+            # 新しい画像を作成
+            sprite_img.putdata(new_data)
+
+            return ImageTk.PhotoImage(sprite_img)
         except Exception as e:
-            print(f"スプライト切り出しエラー: {e}")
+            print(f"スプライト切り出しエラー ({image_name}, index={index}): {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     def on_key_press(self, event):
