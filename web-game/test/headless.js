@@ -113,14 +113,52 @@ function runEpisode(maxTicks) {
   let deepMoves = 0, deepBoxGains = 0, deepFloors = 0, lastDeepFloor = -1;
   let prevTurn = state.turn;
 
+  // fun metrics: tension / monotony / growth / unfairness / tempo
+  const fun = {
+    nearDeaths: 0,      // transitions into hp <= 20% maxHp
+    bigHits: 0,         // net loss >= 50% maxHp within one tick
+    sudden: false,      // died from >= 80% hp in a single tick
+    dullFloors: 0,      // completed floors with 0 kills and 0 boxes
+    floorsDone: 0,      // fully completed floors (stairs taken)
+    maxStagnation: 0,   // longest run of floors with no level gain
+    ticksSum: 0,
+    maxFloorTicks: 0,
+    finalLevel: 1,
+  };
+  let floorTicks = 0, stagnation = 0;
+  let floorKills0 = state.records.totalKills, floorBoxes0 = state.records.totalBoxes;
+  let lvlAtEntry = state.player.level;
+  let prevHp = state.player.hp, prevMaxHp = state.player.maxHp;
+
+  function finishFloor() {
+    fun.floorsDone++;
+    fun.ticksSum += floorTicks;
+    if (floorTicks > fun.maxFloorTicks) fun.maxFloorTicks = floorTicks;
+    const kills = state.records.totalKills - floorKills0;
+    const boxes = state.records.totalBoxes - floorBoxes0;
+    if (kills === 0 && boxes === 0) fun.dullFloors++;
+    if (state.player.level === lvlAtEntry) stagnation++;
+    else stagnation = 0;
+    if (stagnation > fun.maxStagnation) fun.maxStagnation = stagnation;
+    floorTicks = 0;
+    floorKills0 = state.records.totalKills;
+    floorBoxes0 = state.records.totalBoxes;
+    lvlAtEntry = state.player.level;
+  }
+
   for (let tick = 0; tick < maxTicks; tick++) {
     if (state.gameMode !== GameMode.Dungeon) break; // GameOver / GameClear
-    if (state.floor !== curFloor) curFloor = state.floor;
+    if (state.floor !== curFloor) { finishFloor(); curFloor = state.floor; }
+    floorTicks++;
 
     const turnBefore = state.turn;
     autoTick();
     movement();
     statusCheck(false);
+
+    const hpNow = state.player.hp, maxHpNow = state.player.maxHp;
+    if (hpNow < prevHp && prevHp - hpNow >= 0.5 * maxHpNow) fun.bigHits++;
+    if (hpNow > 0 && prevHp > 0.2 * prevMaxHp && hpNow <= 0.2 * maxHpNow) fun.nearDeaths++;
 
     const nowRevive = state.abilityHp[5];
     if (nowRevive < prevRevive) reviveSpent += prevRevive - nowRevive;
@@ -139,6 +177,7 @@ function runEpisode(maxTicks) {
 
     if (state.gameMode === GameMode.GameOver && death.cause === '-') {
       death.cause = state.turn <= 0 ? 'turn' : 'hp';
+      if (death.cause === 'hp') fun.sudden = prevHp >= 0.8 * prevMaxHp;
       death.floor = curFloor;
       death.lvl = state.player.level;
       death.def = state.player.def;
@@ -149,7 +188,11 @@ function runEpisode(maxTicks) {
       death.mNum = state.monsterNumber;
       death.ab = state.abilityHp.slice(0, 6);
     }
+
+    prevHp = state.player.hp; prevMaxHp = state.player.maxHp;
   }
+
+  if (state.gameMode === GameMode.GameClear) finishFloor(); // count the last floor
 
   const outcome = state.gameMode === GameMode.GameClear ? 'CLEAR'
     : state.gameMode === GameMode.GameOver ? 'DEAD' : 'TIMEOUT';
@@ -158,7 +201,10 @@ function runEpisode(maxTicks) {
   death.hpOneEvents = hpOneEvents;
   death.deepMovesPerFloor = deepFloors ? +(deepMoves / deepFloors).toFixed(1) : 0;
   death.deepGainPerFloor = deepFloors ? +(deepBoxGains / deepFloors).toFixed(1) : 0;
-  return { outcome, deepestFloor: curFloor, death };
+  fun.finalLevel = state.player.level;
+  fun.reviveSpent = reviveSpent;
+  fun.hpDeath = death.cause === 'hp';
+  return { outcome, deepestFloor: curFloor, death, fun };
 }
 
 // ── trace mode ──────────────────────────────────────────────────────────────
@@ -193,6 +239,7 @@ const seed0 = parseInt(process.env.SEED0 || '0', 10);
 const outcomes = { CLEAR: 0, DEAD: 0, TIMEOUT: 0 };
 const deepest = [];
 const deaths = [];
+const funs = [];
 
 for (let e = 0; e < episodes; e++) {
   Math.random = mulberry32(0x9e3779b9 + (seed0 + e) * 7919);
@@ -200,11 +247,12 @@ for (let e = 0; e < episodes; e++) {
   outcomes[r.outcome]++;
   deepest.push(r.deepestFloor);
   if (r.outcome === 'DEAD') deaths.push(r.death);
+  funs.push(r.fun);
   if (!process.env.JSON) console.log(`  ep${seed0 + e}: ${r.outcome} floor=${r.deepestFloor}`);
 }
 
 if (process.env.JSON) {
-  console.log(JSON.stringify({ seed0, episodes, outcomes, deepest, deaths }));
+  console.log(JSON.stringify({ seed0, episodes, outcomes, deepest, deaths, fun: funs }));
   process.exit(0);
 }
 
@@ -223,4 +271,23 @@ if (deaths.length) {
   console.log(`at death: lvl=${avg(d => d.lvl)} atk=${avg(d => d.atk)} def=${avg(d => d.def)} maxHp=${avg(d => d.maxHp)}`);
   console.log(`monsters: atk=${avg(d => d.mAtk)} maxHp=${avg(d => d.mHp)} num=${avg(d => d.mNum)}`);
   console.log(`unspent at death: [${['全体','回復','全回','除去','次階','蘇生'].map((n, k) => `${n}=${avg(d => d.ab[k])}`).join(' ')}]`);
+}
+
+// ── fun metrics report ────────────────────────────────────────────────────────
+// Per-episode rates are normalised per 100 completed floors so short (early
+// death) and long (clear) runs are comparable, then averaged across episodes.
+{
+  const withFloors = funs.filter(f => f.floorsDone > 0);
+  const mean = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
+  const per100 = sel => mean(withFloors.map(f => sel(f) / f.floorsDone * 100));
+  const fmt = n => n.toFixed(1);
+  const hpDeaths = funs.filter(f => f.hpDeath);
+  const suddenPct = hpDeaths.length
+    ? (100 * hpDeaths.filter(f => f.sudden).length / hpDeaths.length).toFixed(0) : '-';
+  console.log('═══ Fun metrics ═══');
+  console.log(`緊張感: nearDeath/100F=${fmt(per100(f => f.nearDeaths))}  蘇生発動/100F=${fmt(per100(f => f.reviveSpent))}`);
+  console.log(`単調さ: 無イベント階=${fmt(per100(f => f.dullFloors))}%`);
+  console.log(`成長  : 最大Lv停滞=${fmt(mean(withFloors.map(f => f.maxStagnation)))}階  Lv/100F=${fmt(per100(f => f.finalLevel - 1))}`);
+  console.log(`理不尽: bigHit/100F=${fmt(per100(f => f.bigHits))}  即死率(HP死のうち)=${suddenPct}%`);
+  console.log(`テンポ: ticks/floor=${fmt(mean(withFloors.map(f => f.ticksSum / f.floorsDone)))}  max1floor=${Math.max(...funs.map(f => f.maxFloorTicks))}`);
 }

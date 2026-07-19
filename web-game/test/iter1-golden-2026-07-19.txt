@@ -1,0 +1,36 @@
+map source: Map40.bmp (real)
+  ep0: DEAD floor=910
+  ep1: CLEAR floor=999
+  ep2: DEAD floor=472
+  ep3: DEAD floor=9
+  ep4: CLEAR floor=999
+  ep5: DEAD floor=491
+  ep6: DEAD floor=884
+  ep7: DEAD floor=977
+  ep8: DEAD floor=17
+  ep9: DEAD floor=965
+  ep10: DEAD floor=563
+  ep11: CLEAR floor=999
+  ep12: DEAD floor=914
+  ep13: CLEAR floor=999
+  ep14: CLEAR floor=999
+  ep15: CLEAR floor=999
+  ep16: CLEAR floor=999
+  ep17: DEAD floor=848
+  ep18: CLEAR floor=999
+  ep19: CLEAR floor=999
+═══ Balance report ═══
+episodes=20  outcomes: CLEAR=9 DEAD=11 TIMEOUT=0
+1000F reach rate: 45%
+floor reached: median=977 min=9 max=999
+death cause: hp=2 turn=9
+death floor quartiles: p25=472 p50=848 p75=914
+at death: lvl=341.1 atk=228894458.3 def=807830991.1 maxHp=7812143.3
+monsters: atk=244018.2 maxHp=818188.0 num=65.0
+unspent at death: [全体=0.5 回復=19.7 全回=1.2 除去=0.0 次階=0.0 蘇生=0.0]
+═══ Fun metrics ═══
+緊張感: nearDeath/100F=2.6  蘇生発動/100F=58.5
+単調さ: 無イベント階=5.6%
+成長  : 最大Lv停滞=20.3階  Lv/100F=59.9
+理不尽: bigHit/100F=1.5  即死率(HP死のうち)=0%
+テンポ: ticks/floor=106.7  max1floor=2108
