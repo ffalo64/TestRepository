@@ -718,7 +718,12 @@ export function boxEffect(i, j) {
 
     case T.RedBox:
       switch (ab) {
-        case 0: player.hp = 1; ls.explanation = 'Hpが1になってしまった'; break;
+        case 0:
+          // fun: iter8 — 〜50Fは非即死化(Hp1→maxHpの25%)。序盤の理不尽な即死だけを削り、
+          // 箱そのもの・破壊ターン収入・瀕死体験(緊張感)は残す。rnd()非消費。
+          if (state.floor <= 50) { player.hp = Math.max(rint(player.maxHp * 0.25), 1); ls.explanation = 'Hpが大きく減った'; }
+          else { player.hp = 1; ls.explanation = 'Hpが1になってしまった'; }
+          break;
         case 1: player.atk = rint(player.atk * 0.9); ls.explanation = '攻撃力が下がった'; break;
         case 2: player.condition = A.Slow; ls.explanation = 'プレイヤーはこのフロアにいる間、動きが遅くなった。'; break;
         case 3: player.condition = TURN_CONST; ls.explanation = 'このフロアにいる間、ターン数が減らなくなった。'; break;
