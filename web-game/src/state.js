@@ -57,3 +57,7 @@ export const state = {
   bossIdx: -1,
   records: { deepestFloor: 0, clears: 0, totalKills: 0, totalBoxes: 0, bossKills: 0, runs: 0 },
 };
+
+// fun: デフォルト難易度は Normal (2026-07-20: 難易度=クリア階数のみ、
+// GOAL_FLOORS[2]=100階)。Optionsで変更でき、セーブ(save[15])が上書きする。
+state.player.ability = 2;
