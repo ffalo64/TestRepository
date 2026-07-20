@@ -1,4 +1,4 @@
-import { SC, LAND_NUMBER, PLAYER_CONST, GameMode, T, A, TURN_CONST } from './constants.js';
+import { SC, LAND_NUMBER, PLAYER_CONST, GameMode, T, A, TURN_CONST, GOAL_FLOORS } from './constants.js';
 import { state, makeStatus } from './state.js';
 import { mapSet } from './mapLoader.js';
 import { playMusic, stopAll, sfx } from './audio.js';
@@ -8,6 +8,9 @@ import { BANDS, bandIndex, titleFor } from './lore.js';
 
 const rnd = () => Math.random();
 const rint = n => Math.floor(n);
+
+// fun: 難易度(player.ability)はクリア階数のみを変える(2026-07-20)
+export const goalFloor = () => GOAL_FLOORS[state.player.ability] ?? 1000;
 
 // ── monsterSet ────────────────────────────────────────────────────────────────
 
@@ -155,7 +158,7 @@ export function wordSet() {
     const pages = [
       ['How to play\n1/7', '\nこのゲームは気楽に遊べるゲームです。', 'なので、説明を読むのが嫌な人は、\n説明は読み飛ばしてしまって構いです。', '', '', '', '', '', '\n(xキーでメニュー画面に戻る,右左キーでページ選択)'],
       ['How to play\n2/7', 'このゲームはモンスターを倒しながら、\n次の階を目指して階段を下りていくゲームです。', 'プレイヤー                      \nモンスター                      ', '階段                      \n(階段はマウスポインタと見た目が紛らわしいので注意してください。)', '操作は基本的に十字キーによる移動だけです。\n攻撃は隣の敵マスに進もうとするだけで出せます。', '\n壁                     ', '道                     \n', 'ダンジョンの地形は主に2種類あります。\nそのうち壁の上には進むことができません。', '\n(xキーでメニュー画面に戻る,右左キーでページ選択)'],
-      ['How to play\n3/7', 'ダンジョンに出てくる5つの箱\n', '青…受けるとHPを回復し、モンスターの状態異常が解除される。\n赤…受けるとマイナス効果が与えられる。', '黄…受けると色々な効果が与えられる\n緑…受けるとプラス効果が与えられる。', '紫…受けるとコマンドキーの使用回数を増加。\n', '箱について\n', 'この5つの箱のうち、紫以外は消えてしまいます。\nその箱は効果などで別の箱に変わらず、', '難易度によって効果が変わります。\n', '\n(xキーでメニュー画面に戻る,右左キーでページ選択)'],
+      ['How to play\n3/7', 'ダンジョンに出てくる5つの箱\n', '青…受けるとHPを回復し、モンスターの状態異常が解除される。\n赤…受けるとマイナス効果が与えられる。', '黄…受けると色々な効果が与えられる\n緑…受けるとプラス効果が与えられる。', '紫…受けるとコマンドキーの使用回数を増加。\n', '箱について\n', 'この5つの箱のうち、紫以外は消えてしまいます。\nその箱は効果などで別の箱に変わらず、', '(難易度で変わるのはクリア階数だけです。)\n', '\n(xキーでメニュー画面に戻る,右左キーでページ選択)'],
       ['How to play\n4/7', 'ダンジョン内で使える5つのコマンド\n', 'zキー...敵全体と青/緑/紫の箱に攻撃\nxキー...Hpを全回復させる', 'cキー...階段以外の全ての箱、壁、モンスターを消去する。\ndキー...モンスターを箱に変化させる', '(zやcで壊した青/緑/紫の箱からは、直接壊すより\n弱い効果を得られます。1回につき3個まで。)', 'Enterキー...次のフロアに降りる\n', '(これらのことはゲーム画面でも表示されているので、\nどのキーがどんな効果かは覚えなくて大丈夫です。)', '', '\n(xキーでメニュー画面に戻る,右左キーでページ選択)'],
       ['How to play\n5/7', 'セーブ/ロードについて\n', 'ゲームを中断したいなら階段の上でSボタンを押すとセーブで出来ます。\n再開したい時は記録の閲覧からロードできます。', 'セーブすると、以前のデータは消えてしまうので、ご注意してください。\n', 'ターンについて\n', 'このゲームでは1ターンごとにターン数が1減っていきます。\nターン数が0になるとゲームオーバーです。', 'そのことを踏まえると、ターン回数は回復します。\n', 'これ以降の説明は、壁を通れるようになったものに入ったようなものです。\n蘇りの術で復活します。', '\n(xキーでメニュー画面に戻る,右左キーでページ選択)'],
       ['How to play\n6/7', 'ダンジョン最大の6つのステータス\n', 'レベル\nこれが上がると、全体的に強くなります。', '攻撃力\nこの数値が大きいほど、与えるダメージが大きくなります。', '守備力\nこの数値が大きいほど、受けるダメージが少なくなります。', 'Hp\n体力です。これが0になると倒れます。', '最大Hp\nHpの最大値です。Hpはこれ以上に回復しません。', '経験値\nこれが溜まるとレベルアップしていきます。', 'モンスターを倒すと、その経験値が自分のものになります。\n(xキーでメニュー画面に戻る,右左キーでページ選択)'],
@@ -169,8 +172,8 @@ export function wordSet() {
   } else if (gm === GameMode.Options) {
     const diffNames = ['Very Easy', 'Easy', 'Normal', 'Hard', 'Very Hard'];
     words[0] = 'Options\n';
-    words[1] = (diffNames[player.ability] || 'Normal') + '\n';
-    words[2] = '違う難易度ほど蘇りの術が出やすいです。\n';
+    words[1] = (diffNames[player.ability] || 'Normal') + ' (' + goalFloor() + '階)\n';
+    words[2] = '難易度で変わるのはクリア階数だけです。\n';
     words[3] = '\n';
     words[4] = 'xキーでメニュー画面に戻る,右左キーで難易度選択\nEnterキーでダンジョンに入る。';
 
@@ -182,7 +185,7 @@ export function wordSet() {
     words[4] = 'xキーでメニュー画面に戻る';
 
   } else if (gm === GameMode.GameClear) {
-    words[0] = 'GameClear\nついに最深部1000Fです。';
+    words[0] = 'GameClear\nついに最深部' + goalFloor() + 'Fです。';
     words[1] = '\nこのゲームを最後まで遊んでくれたあなたは勇者です。';
     words[2] = 'クリア時のステータス\n';
     words[3] = 'HP ' + rint(player.hp) + '/' + player.maxHp + '\nLv ' + player.level;
@@ -595,7 +598,8 @@ export function floorSet() {
     state.monsterNumber += 5; // balance: was +50 (late floors had 235-385 monsters)
   } else if (state.floor === 900) {
     state.monsterNumber = 100; // balance: was 1000
-  } else if (state.floor === 1000) {
+  }
+  if (state.floor === goalFloor()) { // fun: 難易度ごとのクリア階(VE20/E50/N100/H500/VH1000)
     state.records.clears++;
     player.direction = 1; player.alive = false;
     state.gameMode = GameMode.GameClear;
@@ -873,7 +877,10 @@ export function boxEffect(i, j) {
       break;
 
     case T.PurpleBox: {
-      const y = rint(rnd() * (5 - player.ability)) + 1;
+      // fun: 難易度をフロア数のみに変更(2026-07-20)したため、旧仕様の
+      // 難易度依存(5 - player.ability)を廃止し、ハーネス計測と同じ
+      // ability=0相当のロール(1〜5)に固定。rnd()消費数は不変。
+      const y = rint(rnd() * 5) + 1;
       if (ab <= 2)       { abilityHp[0] += y; ls.explanation = '全体攻撃の使用回数を' + y + '増やした。'; }
       else if (ab <= 6)  { abilityHp[1] += y; ls.explanation = 'Hp全回復の使用回数を' + y + '増やした。'; }
       else if (ab === 7) { abilityHp[2] += y; ls.explanation = '全消去の使用回数を' + y + '増やした。'; }

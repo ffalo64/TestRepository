@@ -12,7 +12,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { state } from '../src/state.js';
-import { GameMode, T, SC, LAND_NUMBER } from '../src/constants.js';
+import { GameMode, T, SC, LAND_NUMBER, GOAL_FLOORS } from '../src/constants.js';
 import { landSet, monsterSet, floorSet, movement, statusCheck } from '../src/engine.js';
 import { autoTick } from '../src/autoPlay.js';
 
@@ -85,11 +85,16 @@ function playerTile() {
   return [rint(state.player.left / SC), rint(state.player.top / SC)];
 }
 
+// Difficulty (= goal floor only, 2026-07-20): DIFF env 0-4, default 2 = Normal
+// (100F) — the balance-tuning standard per user decision.
+const DIFF = Math.min(4, Math.max(0, parseInt(process.env.DIFF ?? '2', 10) || 0));
+
 function startRun() {
   // full reset: Entrance landSet zeroes floor / abilityHp / player stats,
   // otherwise the module-singleton state leaks between episodes.
   state.gameMode = GameMode.Entrance;
   landSet();
+  state.player.ability = DIFF;
   state.gameMode = GameMode.Dungeon;
   landSet(); monsterSet(); floorSet();
   state.autoPlay = true;
@@ -264,7 +269,7 @@ deepest.sort((a, b) => a - b);
 const median = deepest[rint(deepest.length / 2)];
 console.log('═══ Balance report ═══');
 console.log(`episodes=${episodes}  outcomes: CLEAR=${outcomes.CLEAR} DEAD=${outcomes.DEAD} TIMEOUT=${outcomes.TIMEOUT}`);
-console.log(`1000F reach rate: ${(100 * outcomes.CLEAR / episodes).toFixed(0)}%`);
+console.log(`クリア率: ${(100 * outcomes.CLEAR / episodes).toFixed(0)}%  (難易度DIFF=${DIFF}, ゴール${GOAL_FLOORS[DIFF]}F)`);
 console.log(`floor reached: median=${median} min=${deepest[0]} max=${deepest[deepest.length - 1]}`);
 if (clearTicks.length) {
   clearTicks.sort((a, b) => a - b);

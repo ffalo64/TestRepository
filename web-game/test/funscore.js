@@ -16,7 +16,7 @@ function parse(path) {
   const t = readFileSync(path, 'utf8');
   const g = (re) => { const m = t.match(re); return m ? parseFloat(m[1]) : NaN; };
   return {
-    clear: g(/1000F reach rate: ([\d.]+)%/),
+    clear: g(/(?:1000F reach rate|クリア率): ([\d.]+)%/),
     nearDeath: g(/nearDeath\/100F=([\d.]+)/),
     revive: g(/蘇生発動\/100F=([\d.]+)/),
     dull: g(/無イベント階=([\d.]+)%/),

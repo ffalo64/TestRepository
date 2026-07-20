@@ -1,0 +1,57 @@
+map source: Map40.bmp (real)
+  ep0: CLEAR floor=99 ticks=6391
+  ep1: CLEAR floor=99 ticks=5103
+  ep2: DEAD floor=38 ticks=3060
+  ep3: CLEAR floor=99 ticks=17568
+  ep4: CLEAR floor=99 ticks=15987
+  ep5: CLEAR floor=99 ticks=7163
+  ep6: CLEAR floor=99 ticks=5500
+  ep7: CLEAR floor=99 ticks=7652
+  ep8: CLEAR floor=99 ticks=9883
+  ep9: CLEAR floor=99 ticks=6374
+  ep10: CLEAR floor=99 ticks=4560
+  ep11: CLEAR floor=99 ticks=7450
+  ep12: CLEAR floor=99 ticks=6119
+  ep13: DEAD floor=41 ticks=3136
+  ep14: CLEAR floor=99 ticks=7571
+  ep15: CLEAR floor=99 ticks=7184
+  ep16: DEAD floor=44 ticks=4546
+  ep17: DEAD floor=45 ticks=4116
+  ep18: CLEAR floor=99 ticks=8043
+  ep19: CLEAR floor=99 ticks=7405
+  ep20: DEAD floor=36 ticks=2003
+  ep21: CLEAR floor=99 ticks=5490
+  ep22: CLEAR floor=99 ticks=6011
+  ep23: CLEAR floor=99 ticks=6709
+  ep24: CLEAR floor=99 ticks=7311
+  ep25: CLEAR floor=99 ticks=7550
+  ep26: DEAD floor=21 ticks=2062
+  ep27: CLEAR floor=99 ticks=7084
+  ep28: CLEAR floor=99 ticks=8114
+  ep29: CLEAR floor=99 ticks=5960
+  ep30: CLEAR floor=99 ticks=8219
+  ep31: CLEAR floor=99 ticks=7185
+  ep32: CLEAR floor=99 ticks=7719
+  ep33: CLEAR floor=99 ticks=7679
+  ep34: CLEAR floor=99 ticks=7536
+  ep35: CLEAR floor=99 ticks=7146
+  ep36: DEAD floor=43 ticks=3972
+  ep37: DEAD floor=38 ticks=5413
+  ep38: CLEAR floor=99 ticks=6083
+  ep39: CLEAR floor=99 ticks=5984
+═══ Balance report ═══
+episodes=40  outcomes: CLEAR=32 DEAD=8 TIMEOUT=0
+クリア率: 80%  (難易度DIFF=2, ゴール100F)
+floor reached: median=99 min=21 max=99
+クリアタイム(tick): median=7185 avg=7554 min=4560 max=17568
+death cause: hp=8 turn=0
+death floor quartiles: p25=38 p50=41 p75=44
+at death: lvl=37.0 atk=547.0 def=53.3 maxHp=326.1
+monsters: atk=69.9 maxHp=244.0 num=17.5
+unspent at death: [全体=0.0 回復=0.0 全回=1.9 除去=0.0 次階=0.0 蘇生=0.0]
+═══ Fun metrics ═══
+緊張感: nearDeath/100F=7.6  蘇生発動/100F=33.0
+単調さ: 無イベント階=3.1%
+成長  : 最大Lv停滞=12.7階  Lv/100F=92.6
+理不尽: bigHit/100F=0.9  即死率(HP死のうち)=0%
+テンポ: ticks/floor=79.2  max1floor=2252

@@ -10,6 +10,11 @@ export const T = Object.freeze({ BlueBox:0, RedBox:1, YellowBox:2, GreenBox:3, P
 // Monster / player ability (condition)
 export const A = Object.freeze({ Noability:0, WallBreak:1, Slow:2, Boxattack:3, Stealth:4 });
 
+// fun: 難易度(player.ability 0-4)はクリア階数「だけ」を変える (2026-07-20
+// ユーザー決定: VE=20 / E=50 / N=100 / H=500 / VH=1000。VH=旧仕様の1000F。
+// バランス調整の基準は Normal=100F)。
+export const GOAL_FLOORS = Object.freeze([20, 50, 100, 500, 1000]);
+
 // TurnConst = 3 (same value as Boxattack but used for player.condition)
 export const TURN_CONST = 3;
 
