@@ -156,7 +156,7 @@ export function wordSet() {
       ['How to play\n1/7', '\nこのゲームは気楽に遊べるゲームです。', 'なので、説明を読むのが嫌な人は、\n説明は読み飛ばしてしまって構いです。', '', '', '', '', '', '\n(xキーでメニュー画面に戻る,右左キーでページ選択)'],
       ['How to play\n2/7', 'このゲームはモンスターを倒しながら、\n次の階を目指して階段を下りていくゲームです。', 'プレイヤー                      \nモンスター                      ', '階段                      \n(階段はマウスポインタと見た目が紛らわしいので注意してください。)', '操作は基本的に十字キーによる移動だけです。\n攻撃は隣の敵マスに進もうとするだけで出せます。', '\n壁                     ', '道                     \n', 'ダンジョンの地形は主に2種類あります。\nそのうち壁の上には進むことができません。', '\n(xキーでメニュー画面に戻る,右左キーでページ選択)'],
       ['How to play\n3/7', 'ダンジョンに出てくる5つの箱\n', '青…受けるとHPを回復し、モンスターの状態異常が解除される。\n赤…受けるとマイナス効果が与えられる。', '黄…受けると色々な効果が与えられる\n緑…受けるとプラス効果が与えられる。', '紫…受けるとコマンドキーの使用回数を増加。\n', '箱について\n', 'この5つの箱のうち、紫以外は消えてしまいます。\nその箱は効果などで別の箱に変わらず、', '難易度によって効果が変わります。\n', '\n(xキーでメニュー画面に戻る,右左キーでページ選択)'],
-      ['How to play\n4/7', 'ダンジョン内で使える5つのコマンド\n', 'zキー...敵全体に攻撃\nxキー...Hpを全回復させる', 'cキー...階段以外の全ての箱、壁、モンスターを消去する。\ndキー...モンスターを箱に変化させる', 'Enterキー...次のフロアに降りる\n', '(これらのことはゲーム画面でも表示されているので、\nどのキーがどんな効果かは覚えなくて大丈夫です。)', '', '', '\n(xキーでメニュー画面に戻る,右左キーでページ選択)'],
+      ['How to play\n4/7', 'ダンジョン内で使える5つのコマンド\n', 'zキー...敵全体と青/緑/紫の箱に攻撃\nxキー...Hpを全回復させる', 'cキー...階段以外の全ての箱、壁、モンスターを消去する。\ndキー...モンスターを箱に変化させる', '(zやcで壊した青/緑/紫の箱からは、直接壊すより\n弱い効果を得られます。1回につき3個まで。)', 'Enterキー...次のフロアに降りる\n', '(これらのことはゲーム画面でも表示されているので、\nどのキーがどんな効果かは覚えなくて大丈夫です。)', '', '\n(xキーでメニュー画面に戻る,右左キーでページ選択)'],
       ['How to play\n5/7', 'セーブ/ロードについて\n', 'ゲームを中断したいなら階段の上でSボタンを押すとセーブで出来ます。\n再開したい時は記録の閲覧からロードできます。', 'セーブすると、以前のデータは消えてしまうので、ご注意してください。\n', 'ターンについて\n', 'このゲームでは1ターンごとにターン数が1減っていきます。\nターン数が0になるとゲームオーバーです。', 'そのことを踏まえると、ターン回数は回復します。\n', 'これ以降の説明は、壁を通れるようになったものに入ったようなものです。\n蘇りの術で復活します。', '\n(xキーでメニュー画面に戻る,右左キーでページ選択)'],
       ['How to play\n6/7', 'ダンジョン最大の6つのステータス\n', 'レベル\nこれが上がると、全体的に強くなります。', '攻撃力\nこの数値が大きいほど、与えるダメージが大きくなります。', '守備力\nこの数値が大きいほど、受けるダメージが少なくなります。', 'Hp\n体力です。これが0になると倒れます。', '最大Hp\nHpの最大値です。Hpはこれ以上に回復しません。', '経験値\nこれが溜まるとレベルアップしていきます。', 'モンスターを倒すと、その経験値が自分のものになります。\n(xキーでメニュー画面に戻る,右左キーでページ選択)'],
       ['How to play\n7/7', 'DLC: 深層の守護者\n', '100階ごとに、そのフロアの守護者(ボス)が待ち構えています。\n赤いオーラをまとった大きなモンスターが目印です。', '倒せば紫の箱と追加ターンが手に入りますが、\n通常より遥かに強敵です。コマンドで切り抜けるのも手です。', 'モンスターは100階ごとに姿と名前を変え、強くなっていきます。\n', '実績と称号\n', '最深到達階・討伐数・守護者討伐などの記録は\nMuseum(記録の閲覧)でいつでも確認できます。', '記録を伸ばすと、あなたの称号が変わっていきます。', '\n(xキーでメニュー画面に戻る,右左キーでページ選択)'],
@@ -897,6 +897,28 @@ export function boxEffect(i, j) {
 
 // ── abilityEffect ─────────────────────────────────────────────────────────────
 
+// fun: 遠隔破壊(全体攻撃/全消去)した青/緑/紫箱から得る弱体化ボーナス。
+// 直接壊す場合(フル効果+ターン+15)より恩恵を絞り、テンポと引き換えにする。
+// 青=回復maxHp/16(通常はmaxHp/4)・緑=atk+1%(通常は抽選で全回復やx1.1等)・
+// 紫=コマンド1回分のみ(通常1〜5回、蘇生は対象外)。ターンボーナスなし。
+// 1回の使用で吸収できるのはREMOTE_BONUS_CAP個まで(初回計測CLEAR80%の
+// ガードレール超過を受けた調整。超過分の箱は壊れるだけ)。
+const REMOTE_BONUS_CAP = 3;
+function remoteBoxBonus(cond) {
+  const { player, abilityHp } = state;
+  if (cond === T.BlueBox) player.hp += rint(player.maxHp / 16);
+  else if (cond === T.GreenBox) player.atk = rint(player.atk * 1.01) + 1;
+  else if (cond === T.PurpleBox) abilityHp[rint(rnd() * 5)]++;
+}
+
+// fun: 遠隔破壊された箱のターン収入は通常破壊(+15)の1/3。ゼロにすると
+// メレー農業で成立していたターン経済に穴が開き、ターン切れ死が増える
+// (iter9b: 13→17件, CLEAR40%)ことが計測で判明したための補償。個数無制限。
+function remoteBoxTurn() {
+  if (state.player.condition !== TURN_CONST) state.turn += 5;
+  state.records.totalBoxes++;
+}
+
 export function abilityEffect(key) {
   const { player, monsters, landsquare, abilityHp } = state;
 
@@ -914,7 +936,8 @@ export function abilityEffect(key) {
   } else if (key === 'KeyZ') {
     if (abilityHp[0] > 0) {
       abilityHp[0]--;
-      const dmg = rint(player.atk * (rnd() * 0.2 + 0.9) / (monsters[0].def || 1));
+      const roll = rnd() * 0.2 + 0.9;
+      const dmg = rint(player.atk * roll / (monsters[0].def || 1));
       const cappedDmg = Math.min(dmg, 1e7-1);
       for (let i = 0; i < state.monsterNumber; i++) {
         const m = monsters[i];
@@ -926,7 +949,24 @@ export function abilityEffect(key) {
           }
         }
       }
-      state.words[2] = '全てのモンスターに' + cappedDmg + 'ダメージを与えた';
+      // fun: 全体攻撃は青/緑/紫の箱にも届く(テンポ改善)。壊れた箱は
+      // remoteBoxBonusの弱体化ボーナスのみで、フル効果もターン+15もない。
+      let boxBroken = 0;
+      for (let i = 0; i < LAND_NUMBER; i++)
+        for (let j = 0; j < LAND_NUMBER; j++) {
+          const ls = landsquare[i][j];
+          const c = ls.condition;
+          if (c !== T.BlueBox && c !== T.GreenBox && c !== T.PurpleBox) continue;
+          ls.hp -= Math.min(rint(player.atk * roll / Math.max(1, ls.def)) + 1, 1e7-1);
+          if (ls.hp <= 0) {
+            ls.hp = 0; ls.condition = T.Room; ls.ability = 0;
+            if (boxBroken < REMOTE_BONUS_CAP) remoteBoxBonus(c);
+            remoteBoxTurn();
+            boxBroken++;
+          }
+        }
+      state.words[2] = '全てのモンスターに' + cappedDmg + 'ダメージを与えた'
+        + (boxBroken ? '。箱' + boxBroken + '個を砕き、微かな力を得た' : '');
       player.direction = 11;
       state.tileLayerDirty = true;
     }
@@ -937,13 +977,24 @@ export function abilityEffect(key) {
   } else if (key === 'KeyC') {
     if (abilityHp[2] > 0) {
       abilityHp[2]--;
+      // fun: 全消去は紫箱も消去対象に加え、青/緑/紫の箱からは
+      // remoteBoxBonusの弱体化ボーナスを取り込む(テンポ改善)。
+      let absorbed = 0;
       for (let i = 0; i < LAND_NUMBER; i++)
         for (let j = 0; j < LAND_NUMBER; j++) {
           const c = landsquare[i][j].condition;
-          if (c <= T.GreenBox || c === T.Wall) landsquare[i][j].condition = T.Room;
+          if (c <= T.PurpleBox || c === T.Wall) {
+            if (c === T.BlueBox || c === T.GreenBox || c === T.PurpleBox) {
+              if (absorbed < REMOTE_BONUS_CAP) remoteBoxBonus(c);
+              remoteBoxTurn();
+              absorbed++;
+            }
+            landsquare[i][j].condition = T.Room;
+          }
         }
       for (let x = 0; x < state.monsterNumber; x++)
         if (monsters[x].alive) { monsters[x].alive=false; monsters[x].hp=0; monsters[x].condition=0; landsquare[rint(monsters[x].left/SC)][rint(monsters[x].top/SC)].condition=T.Room; }
+      if (absorbed) state.words[2] = '消した箱' + absorbed + '個から微かな力を取り込んだ';
       state.tileLayerDirty = true;
     }
 
