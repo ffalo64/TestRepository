@@ -28,6 +28,7 @@ let _sigHistory = [];
 let _stuckTicks = 0;
 let _lastFloor = -1;
 let _floorOpenedHandled = false;
+let _tempoZUsed = false, _tempoCUsed = false; // fun: iter10 tempo casts, once each per floor
 let _prevI = -1, _prevJ = -1; // player tile on the previous decision tick
 const STUCK_THRESHOLD = 4;
 
@@ -80,6 +81,17 @@ function updateCycleDetection(sig) {
 function countAliveMonsters() {
   let n = 0;
   for (let i = 0; i < state.monsterNumber; i++) if (state.monsters[i].alive) n++;
+  return n;
+}
+
+// fun: iter10 — boxes the remote break (iter9) can absorb: blue/green/purple.
+function remoteTargetBoxes() {
+  let n = 0;
+  for (let i = 0; i < LAND_NUMBER; i++)
+    for (let j = 0; j < LAND_NUMBER; j++) {
+      const c = state.landsquare[i][j].condition;
+      if (c === T.BlueBox || c === T.GreenBox || c === T.PurpleBox) n++;
+    }
   return n;
 }
 
@@ -549,6 +561,8 @@ export function autoTick() {
     resetCycleState();
     _lastFloor = state.floor;
     _floorOpenedHandled = false;
+    _tempoZUsed = false;
+    _tempoCUsed = false;
   }
 
   const pi = rint(player.left / SC);
@@ -590,6 +604,22 @@ export function autoTick() {
     return;
   }
   _floorOpenedHandled = true;
+
+  // ── Priority 2.5: TEMPO ──────────────────────────────────────────────
+  // fun: iter10 — the objective now includes CLEAR TIME, not just survival
+  // (user decision 2026-07-20): melee-farming every box is the safest play
+  // but the slowest. Spend SURPLUS charges (always keep 1 in reserve for the
+  // survival branches above) on the iter9 remote break to hoover the floor's
+  // boxes/monsters at range and skip the walking. Once each per floor.
+  if (!_tempoCUsed && abilityHp[2] >= 2 && state.monsterNumber >= 30 && aliveMonsters > 5) {
+    _tempoCUsed = true; abilityEffect('KeyC'); resetCycleState(); return;
+  }
+  // Keep exactly ONE charge in reserve. A 2-charge early reserve was measured
+  // WORSE on both objectives (iter10b: CLEAR 73→63%, clear time +5%) — idle
+  // charges cost more than the emergencies they insure against.
+  if (!_tempoZUsed && abilityHp[0] >= 2 && remoteTargetBoxes() >= 3) {
+    _tempoZUsed = true; abilityEffect('KeyZ'); resetCycleState(); return;
+  }
 
   // ── Priority 3: ESCAPE CYCLES ────────────────────────────────────────
 

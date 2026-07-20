@@ -4,7 +4,12 @@
 // scored as its %-change vs baseline, signed so that the target direction is
 // positive, clipped to ±100%; metrics within a category are averaged, then the
 // five category scores are averaged into FUN. Adopt when FUN > 0 and the
-// guardrails hold (CLEAR 45-65%, sudden-death 0%).
+// guardrails hold (CLEAR within ±10pp of the baseline report, sudden-death 0%).
+// 2026-07-20: the CLEAR guardrail became RELATIVE (was absolute 45-65%) —
+// iter10 made the AI itself stronger, so an absolute band would misread every
+// later game change as "too easy". The band tracks whatever reference the
+// baseline file embodies. It gates GAME changes; for AI-strategy changes judge
+// on the objectives directly (survival + clear time).
 import { readFileSync } from 'node:fs';
 
 function parse(path) {
@@ -44,11 +49,11 @@ const cats = [
 ];
 const fun = cats.reduce((a, [, s]) => a + s, 0) / cats.length;
 
-const guardClear = v.clear >= 45 && v.clear <= 65;
+const guardClear = isFinite(b.clear) && Math.abs(v.clear - b.clear) <= 10;
 const guardSudden = v.sudden === 0;
 
 console.log('═══ FUN score ═══  (baseline: ' + bFile + ')');
 for (const [name, s] of cats) console.log(`  ${name}: ${s >= 0 ? '+' : ''}${s.toFixed(1)}`);
 console.log(`  FUN合計: ${fun >= 0 ? '+' : ''}${fun.toFixed(1)}  (>0で採用)`);
-console.log(`  ガードレール: CLEAR=${v.clear}% ${guardClear ? 'OK' : 'NG'} / 即死率=${v.sudden}% ${guardSudden ? 'OK' : 'NG'}`);
+console.log(`  ガードレール: CLEAR=${v.clear}% (基準${b.clear}%±10pp) ${guardClear ? 'OK' : 'NG'} / 即死率=${v.sudden}% ${guardSudden ? 'OK' : 'NG'}`);
 console.log(`  判定: ${fun > 0 && guardClear && guardSudden ? '✅ 採用' : '❌ 棄却'}`);

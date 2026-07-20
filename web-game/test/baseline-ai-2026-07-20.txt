@@ -1,0 +1,57 @@
+map source: Map40.bmp (real)
+  ep0: DEAD floor=954 ticks=102179
+  ep1: CLEAR floor=999 ticks=120286
+  ep2: CLEAR floor=999 ticks=120720
+  ep3: DEAD floor=654 ticks=66916
+  ep4: DEAD floor=54 ticks=5852
+  ep5: CLEAR floor=999 ticks=116880
+  ep6: DEAD floor=52 ticks=7249
+  ep7: CLEAR floor=999 ticks=114127
+  ep8: DEAD floor=846 ticks=97857
+  ep9: CLEAR floor=999 ticks=118947
+  ep10: DEAD floor=18 ticks=1431
+  ep11: CLEAR floor=999 ticks=112667
+  ep12: CLEAR floor=999 ticks=115377
+  ep13: CLEAR floor=999 ticks=102561
+  ep14: DEAD floor=984 ticks=124473
+  ep15: DEAD floor=993 ticks=111875
+  ep16: CLEAR floor=999 ticks=131920
+  ep17: DEAD floor=31 ticks=3765
+  ep18: DEAD floor=842 ticks=89580
+  ep19: CLEAR floor=999 ticks=99326
+  ep20: CLEAR floor=999 ticks=117981
+  ep21: CLEAR floor=999 ticks=100808
+  ep22: CLEAR floor=999 ticks=113517
+  ep23: DEAD floor=29 ticks=3593
+  ep24: CLEAR floor=999 ticks=103027
+  ep25: CLEAR floor=999 ticks=117747
+  ep26: CLEAR floor=999 ticks=113783
+  ep27: CLEAR floor=999 ticks=94924
+  ep28: CLEAR floor=999 ticks=130333
+  ep29: DEAD floor=909 ticks=95895
+  ep30: DEAD floor=948 ticks=92825
+  ep31: CLEAR floor=999 ticks=137331
+  ep32: DEAD floor=57 ticks=5274
+  ep33: DEAD floor=984 ticks=115652
+  ep34: CLEAR floor=999 ticks=110763
+  ep35: DEAD floor=895 ticks=94817
+  ep36: CLEAR floor=999 ticks=97184
+  ep37: CLEAR floor=999 ticks=116965
+  ep38: CLEAR floor=999 ticks=107506
+  ep39: CLEAR floor=999 ticks=105137
+═══ Balance report ═══
+episodes=40  outcomes: CLEAR=24 DEAD=16 TIMEOUT=0
+1000F reach rate: 60%
+floor reached: median=999 min=18 max=999
+クリアタイム(tick): median=114127 avg=113325 min=94924 max=137331
+death cause: hp=6 turn=10
+death floor quartiles: p25=54 p50=846 p75=954
+at death: lvl=300.2 atk=223700745.1 def=625000039.4 maxHp=5579208.8
+monsters: atk=184792.4 maxHp=625082.4 num=60.6
+unspent at death: [全体=0.0 回復=11.2 全回=2.2 除去=0.0 次階=0.0 蘇生=0.0]
+═══ Fun metrics ═══
+緊張感: nearDeath/100F=7.1  蘇生発動/100F=50.5
+単調さ: 無イベント階=4.7%
+成長  : 最大Lv停滞=18.6階  Lv/100F=57.1
+理不尽: bigHit/100F=1.4  即死率(HP死のうち)=0%
+テンポ: ticks/floor=111.8  max1floor=2647

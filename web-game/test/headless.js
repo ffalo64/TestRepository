@@ -146,10 +146,12 @@ function runEpisode(maxTicks) {
     lvlAtEntry = state.player.level;
   }
 
+  let totalTicks = 0;
   for (let tick = 0; tick < maxTicks; tick++) {
     if (state.gameMode !== GameMode.Dungeon) break; // GameOver / GameClear
     if (state.floor !== curFloor) { finishFloor(); curFloor = state.floor; }
     floorTicks++;
+    totalTicks++;
 
     const turnBefore = state.turn;
     autoTick();
@@ -204,7 +206,7 @@ function runEpisode(maxTicks) {
   fun.finalLevel = state.player.level;
   fun.reviveSpent = reviveSpent;
   fun.hpDeath = death.cause === 'hp';
-  return { outcome, deepestFloor: curFloor, death, fun };
+  return { outcome, deepestFloor: curFloor, death, fun, totalTicks };
 }
 
 // ── trace mode ──────────────────────────────────────────────────────────────
@@ -240,6 +242,7 @@ const outcomes = { CLEAR: 0, DEAD: 0, TIMEOUT: 0 };
 const deepest = [];
 const deaths = [];
 const funs = [];
+const clearTicks = [];
 
 for (let e = 0; e < episodes; e++) {
   Math.random = mulberry32(0x9e3779b9 + (seed0 + e) * 7919);
@@ -247,8 +250,9 @@ for (let e = 0; e < episodes; e++) {
   outcomes[r.outcome]++;
   deepest.push(r.deepestFloor);
   if (r.outcome === 'DEAD') deaths.push(r.death);
+  if (r.outcome === 'CLEAR') clearTicks.push(r.totalTicks);
   funs.push(r.fun);
-  if (!process.env.JSON) console.log(`  ep${seed0 + e}: ${r.outcome} floor=${r.deepestFloor}`);
+  if (!process.env.JSON) console.log(`  ep${seed0 + e}: ${r.outcome} floor=${r.deepestFloor} ticks=${r.totalTicks}`);
 }
 
 if (process.env.JSON) {
@@ -262,6 +266,11 @@ console.log('═══ Balance report ═══');
 console.log(`episodes=${episodes}  outcomes: CLEAR=${outcomes.CLEAR} DEAD=${outcomes.DEAD} TIMEOUT=${outcomes.TIMEOUT}`);
 console.log(`1000F reach rate: ${(100 * outcomes.CLEAR / episodes).toFixed(0)}%`);
 console.log(`floor reached: median=${median} min=${deepest[0]} max=${deepest[deepest.length - 1]}`);
+if (clearTicks.length) {
+  clearTicks.sort((a, b) => a - b);
+  const ctAvg = rint(clearTicks.reduce((a, b) => a + b, 0) / clearTicks.length);
+  console.log(`クリアタイム(tick): median=${clearTicks[rint(clearTicks.length / 2)]} avg=${ctAvg} min=${clearTicks[0]} max=${clearTicks[clearTicks.length - 1]}`);
+}
 if (deaths.length) {
   const avg = f => (deaths.reduce((a, d) => a + f(d), 0) / deaths.length).toFixed(1);
   const floors = deaths.map(d => d.floor).sort((a, b) => a - b);
