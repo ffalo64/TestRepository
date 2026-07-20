@@ -123,7 +123,7 @@ export function wordSet() {
   } else if (gm === GameMode.Dungeon) {
     words[4] = '全体攻撃(z)\n' + abilityHp[0];
     words[5] = 'Hp全回復(x)\n' + abilityHp[1];
-    words[6] = '全回復(c)\n' + abilityHp[2];
+    words[6] = '全消去(c)\n' + abilityHp[2];
     words[7] = 'モンスター除去(d)\n' + abilityHp[3];
     words[8] = '次の階へ(Enter)\n' + abilityHp[4] + '\n蘇りの術\n' + abilityHp[5];
     words[9] = state.floor + 'F  Lv' + player.level
@@ -192,7 +192,7 @@ export function wordSet() {
   } else if (gm === GameMode.Museum) {
     words[0] = '現在の記録\n';
     words[1] = (state.floor + 1) + 'F  Lv' + player.level + '\nHP' + rint(player.hp) + '/' + player.maxHp + '  Turn ' + state.turn;
-    words[2] = '全体攻撃 ' + state.abilityHp[0] + '\nHp全回復 ' + state.abilityHp[1] + '\n全回復 ' + state.abilityHp[2];
+    words[2] = '全体攻撃 ' + state.abilityHp[0] + '\nHp全回復 ' + state.abilityHp[1] + '\n全消去 ' + state.abilityHp[2];
     words[3] = 'モンスター除去 ' + state.abilityHp[3] + '\n次の階へ ' + state.abilityHp[4] + '\n蘇りの術 ' + state.abilityHp[5];
     words[4] = 'Lボタンを押すと、このセーブデータから始められます。\nxキーでメニュー画面に戻る';
     const r = state.records;
@@ -876,7 +876,7 @@ export function boxEffect(i, j) {
       const y = rint(rnd() * (5 - player.ability)) + 1;
       if (ab <= 2)       { abilityHp[0] += y; ls.explanation = '全体攻撃の使用回数を' + y + '増やした。'; }
       else if (ab <= 6)  { abilityHp[1] += y; ls.explanation = 'Hp全回復の使用回数を' + y + '増やした。'; }
-      else if (ab === 7) { abilityHp[2] += y; ls.explanation = '全回復の使用回数を' + y + '増やした。'; }
+      else if (ab === 7) { abilityHp[2] += y; ls.explanation = '全消去の使用回数を' + y + '増やした。'; }
       else if (ab === 8) { abilityHp[3] += y; ls.explanation = 'モンスター除去の使用回数を' + y + '増やした。'; }
       else if (ab <= 10) { abilityHp[4] += y; ls.explanation = '次の階へ行く術の使用回数を' + y + '増やした。'; } // balance: was ab<=11 (蘇生 3/15→4/15)
       else               { abilityHp[5] += y; ls.explanation = '蘇りの術が' + y + '回にまで増えた。'; }

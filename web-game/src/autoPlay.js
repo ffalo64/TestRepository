@@ -639,7 +639,7 @@ export function autoTick() {
   // with no way to heal or running low on turns — then cut losses and descend.
   const lowTurn = state.turn < 60;
   const hurt = hpRatio < 0.5;
-  // KeyC (全回復) clears boxes/walls/monsters but does NOT heal HP (VB6-
+  // KeyC (全消去) clears boxes/walls/monsters but does NOT heal HP (VB6-
   // faithful), so the only real heals are KeyX charges and blue boxes.
   const noHeal = abilityHp[1] === 0;
 
