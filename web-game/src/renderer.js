@@ -28,9 +28,10 @@ function drawDungeon(ctx) {
   const { landsquare, player, monsters, floor } = state;
   const animFrame = Math.floor((floor % 200) / 20);
 
-  // tile layer (cached)
+  // tile layer + minimap base (cached, redrawn together on real tile changes)
   if (state.tileLayerDirty) {
     renderTileLayer(animFrame);
+    renderMinimapBase();
     state.tileLayerDirty = false;
   }
   ctx.drawImage(state.tileLayerCanvas, 0, 0);
@@ -158,23 +159,33 @@ function drawHpBar(ctx) {
   ctx.strokeRect(BAR_X, BAR_Y, BAR_W, BAR_H);
 }
 
-function drawMinimap(ctx) {
-  const { landsquare, player, floor } = state;
-  const MX = SPEC_X + 10, MY = STATUS_Y + 30;
-  const CELL = 2;
-  const mapW = LAND_NUMBER * CELL;
-  const animFrame = Math.floor((floor % 200) / 20);
+let _minimapBase = null;
 
+function renderMinimapBase() {
+  const { landsquare } = state;
+  const CELL = 2;
+  if (!_minimapBase) _minimapBase = new OffscreenCanvas(LAND_NUMBER * CELL, LAND_NUMBER * CELL);
+  const mctx = _minimapBase.getContext('2d');
   for (let i = 0; i < LAND_NUMBER; i++) {
     for (let j = 0; j < LAND_NUMBER; j++) {
       const c = landsquare[i][j].condition;
-      if (c === T.Wall) ctx.fillStyle = '#555';
-      else if (c === T.Room || c === T.Enemy) ctx.fillStyle = '#222';
-      else if (c === T.Stair) ctx.fillStyle = '#fff';
-      else ctx.fillStyle = BOX_COLORS[c] || '#888';
-      ctx.fillRect(MX + i*CELL, MY + j*CELL, CELL, CELL);
+      if (c === T.Wall) mctx.fillStyle = '#555';
+      else if (c === T.Room || c === T.Enemy) mctx.fillStyle = '#222';
+      else if (c === T.Stair) mctx.fillStyle = '#fff';
+      else mctx.fillStyle = BOX_COLORS[c] || '#888';
+      mctx.fillRect(i*CELL, j*CELL, CELL, CELL);
     }
   }
+}
+
+function drawMinimap(ctx) {
+  const { player } = state;
+  const MX = SPEC_X + 10, MY = STATUS_Y + 30;
+  const CELL = 2;
+  const mapW = LAND_NUMBER * CELL;
+
+  if (!_minimapBase) renderMinimapBase();
+  ctx.drawImage(_minimapBase, MX, MY);
   // boss dot (DLC)
   if (state.bossIdx >= 0) {
     const b = state.monsters[state.bossIdx];

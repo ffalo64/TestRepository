@@ -441,7 +441,8 @@ export function positionCheck(character) {
     landsquare[rint(m.oleft/SC)][rint(m.otop/SC)].condition = T.Room;
     landsquare[ni][nj].condition = T.Enemy;
     m.oleft = m.left; m.otop = m.top;
-    state.tileLayerDirty = true;
+    // perf: no tileLayerDirty here — Room/Enemy tiles render identically, and
+    // real tile changes (box/wall destruction) set the flag where they happen.
   }
 }
 
@@ -464,8 +465,7 @@ export function movement() {
       if (p.direction % 5 === 0 && p.left < maxPos) p.left += SC;
       if (p.direction % 7 === 0 && p.left > 0)      p.left -= SC;
 
-      positionCheck(PLAYER_CONST);
-      state.tileLayerDirty = true;
+      positionCheck(PLAYER_CONST); // perf: movement never changes tile visuals; no blanket tileLayerDirty
 
       if (p.condition !== A.Slow) {
         p.direction = 1; state.turn--;
