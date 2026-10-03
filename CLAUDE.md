@@ -6,7 +6,9 @@
 - `web-game/` がブラウザ版（Vite + 素の ES modules）。
   - `npm run dev` → http://localhost:5173/
   - `npm test` → Node でのヘッドレス動作テスト（`test/headless.js`）
+  - `npm run autoplay [games] [maxTicks]` → オートプレイ AI の成績（到達階・死因）を集計（`test/autoplay.js`）
   - `src/engine.js` は DOM 非依存のゲームロジック（VB6 の各 Sub を移植）。描画は `renderer.js`、音は `audio.js`、入力は `main.js`。
+  - `src/autoplay.js` はブラウザ版独自のオートプレイ AI（P キーで OFF → 等速 → 4 倍速）。DOM 非依存で、`nextKeys(g)` が返すキーを `keyDown()` に渡す。エンジンには手を入れない。
 
 ## 移植方針
 - ゲームロジックは VB6 に忠実に。VB6 の Double→Long 代入は銀行丸め（`cLng`）、`Int()` は `Math.floor`。
