@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ダンジョンと不思議の箱</title>
+    <link rel="icon" href="./images/Icon1.ico" />
+    <style>
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: #111;
+        color: #ccc;
+        font-family: "Meiryo", "メイリオ", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+      }
+      #screen {
+        width: min(96vw, calc(100vh - 64px));
+        aspect-ratio: 1;
+        background: #000;
+        image-rendering: pixelated;
+        box-shadow: 0 0 24px rgba(0, 0, 0, 0.8);
+      }
+      #help {
+        font-size: 13px;
+        opacity: 0.7;
+        text-align: center;
+      }
+      #status {
+        min-height: 1em;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="screen" width="600" height="600" tabindex="0"></canvas>
+    <div id="help">移動: 矢印キー（同時押しで斜め）／ コマンド: Z X C D Enter ／ セーブ: S ／ 音楽: M</div>
+    <div id="status">読み込み中…</div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
