@@ -6,10 +6,10 @@
 - `web-game/` がブラウザ版（Vite + 素の ES modules）。
   - `npm run dev` → http://localhost:5173/
   - `npm test` → Node でのヘッドレス動作テスト（`test/headless.js`）
-  - `npm run autoplay [games] [maxTicks]` → オートプレイ AI の成績（到達階・死因・100F 到達率）を集計（`test/autoplay.js`。環境変数 `GOAL` `STOP` `SEED0`）
+  - `npm run autoplay [games] [maxTicks]` → オートプレイ AI の成績（到達階・死因・100F 到達率・足踏み率）を集計（`test/autoplay.js`。環境変数 `GOAL` `STOP` `SEED0`）
   - `src/engine.js` は DOM 非依存のゲームロジック（VB6 の各 Sub を移植）。描画は `renderer.js`、音は `audio.js`、入力は `main.js`。
   - `src/autoplay.js` はブラウザ版独自のオートプレイ AI（P キーで OFF → 等速 → 4 倍速）。DOM 非依存で、`nextKeys(g)` が返すキーを `keyDown()` に渡す。エンジンには手を入れない。
-    戦略は箱の期待値（ターン換算）と Dijkstra（箱を壊して進む経路込み）で目的地を選び、戦術は近くのモンスターの動きを 4 手先までシミュレーションして被弾を避ける。100F 到達率は約 40%（48 ゲーム）。
+    戦略は箱の期待値（ターン換算）と Dijkstra（箱を壊して進む経路込み）で目的地を選び、戦術は近くのモンスターの動きを 4 手先までシミュレーションして被弾を避ける。進展の無い手が続くと足踏みとみなし、待ち伏せをやめて全消去などで打開する。100F 到達率は約 75%（144 ゲーム）、足踏みは全手数の約 1%（`npm run autoplay` の `stall`）。
 
 ## 移植方針
 - ゲームロジックは VB6 に忠実に。VB6 の Double→Long 代入は銀行丸め（`cLng`）、`Int()` は `Math.floor`。

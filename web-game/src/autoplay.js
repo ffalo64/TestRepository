@@ -35,6 +35,8 @@ const DETOURS = {
 const CMD_VALUE = [10, 25, 50, 30, 60, 120];
 const SEARCH_RADIUS = 9; // これより遠いモンスターは先読みでは動かないものとして扱う
 const DEATH = 1e5;
+const STALL_SOFT = 6; // これだけ進展が無ければ「敵を待って倒す」のをやめる
+const STALL_HARD = 20; // これだけ進展が無ければコマンドで打開する
 
 const isEdge = (x, y) => x === 0 || y === 0 || x === N - 1 || y === N - 1;
 const cheb = (ax, ay, bx, by) => Math.max(Math.abs(ax - bx), Math.abs(ay - by));
@@ -115,7 +117,13 @@ export function createAutoPlayer() {
   let wait = 0;
   let lastMode = -1;
   let lastFloor = -1;
-  let floorTicks = 0;
+  // 足踏みの検出用（階ごとにリセット）
+  let stall = 0;
+  let prevTurn = 0;
+  let prevAlive = 0;
+  let prevTarget = -1;
+  let prevTargetHp = 0;
+  const bestDist = new Map(); // 目的地ごとの、これまでで一番近づいた距離
 
   // ---- 箱の価値（ターン換算）
   function turnWorth(g) {
@@ -124,6 +132,11 @@ export function createAutoPlayer() {
     if (g.turn < 1500) return 0.5;
     if (g.turn < 5000) return 0.2;
     return 0.05;
+  }
+
+  // 1 手使うことの重さ。ターンが余っているほど軽い（= 遠くの箱も取りに行く）
+  function stepWeight(g) {
+    return Math.max(0.2, Math.min(1.5, 300 / Math.max(1, g.turn)));
   }
 
   function cmdSum(g, f) {
@@ -152,7 +165,8 @@ export function createAutoPlayer() {
     return {
       turnGain: gain,
       [BLUE_BOX]: 2 + hpLost * 30 + gain,
-      [RED_BOX]: -20 - (p.hp / Math.max(1, p.maxHp)) * 10 + gain,
+      // 赤箱は取り返しのつかない効果が多い。ターンが尽きそうなときだけ妥協する
+      [RED_BOX]: -60 - (p.hp / Math.max(1, p.maxHp)) * 10 + (g.turn < 60 ? 60 : 0) + gain,
       [YELLOW_BOX]: yellow + gain,
       [GREEN_BOX]: green + gain,
       [PURPLE_BOX]: purple + gain,
@@ -183,15 +197,18 @@ export function createAutoPlayer() {
       if (dir % 5 === 0 && nx < N - 1) nx++;
       if (dir % 7 === 0 && nx > 0) nx--;
       const mons = st.mons.map((m) => ({ ...m }));
-      const ns = { ...st, mons, x: st.x, y: st.y, turn: st.turn - 1 };
+      const ns = { ...st, mons, x: st.x, y: st.y, turn: st.turn - 1, k: st.k + 1 };
       const i = nx * N + ny;
       const c = cond[i];
       const mk = mons.findIndex((m) => m.alive && m.x === nx && m.y === ny);
       if (mk >= 0) {
         // 攻撃。倒しきれなければその場に残る
         const m = mons[mk];
+        // 安全に倒しきれる相手なら、削った分も評価する（読みの深さより長い戦闘を続けられるように）
+        if (m.safe) ns.kills += m.exp * Math.min(1, pAvg(m) / m.hp0);
         m.hp -= pAvg(m);
-        if (m.hp <= 0) { m.alive = false; ns.kills += m.exp; }
+        // 早く倒すほど高く評価する（「待っていれば倒せる」で足踏みしないように）
+        if (m.hp <= 0) { m.alive = false; if (!m.safe) ns.kills += m.exp * (1 - 0.15 * st.k); }
       } else if (c === STAIR) {
         if (i !== target) return null; // 目的地でない階段は踏まない
         ns.done = true;
@@ -205,6 +222,7 @@ export function createAutoPlayer() {
         ns.x = nx;
         ns.y = ny;
       }
+      if (ns.x === st.x && ns.y === st.y && ns.hits === st.hits && mk < 0) ns.waits++;
       // ENEMY（先読み対象外の遠いモンスター）・壁はぶつかるだけ
       if (stealth) return ns;
       for (let k = 0; k < mons.length; k++) {
@@ -247,11 +265,11 @@ export function createAutoPlayer() {
     const step = makeSim(g, local, cond, target, targetHits);
     const near = local.filter((m) => cheb(m.x, m.y, g.player.x, g.player.y) <= 4).length;
     const depth = local.length === 0 ? 1 : near > 6 ? 3 : 4;
-    const dmgW = 25 / Math.max(1, hpBudget);
+    const dmgW = ctx.dmgScale * 25 / Math.max(1, hpBudget);
 
     const evalLeaf = (st, k) => {
       if (st.dmgMax >= hpBudget) return deathCost + (depth - k) * -10;
-      let sc = st.dmg * dmgW - st.kills * ctx.killW;
+      let sc = st.dmg * dmgW - st.kills * ctx.killW + st.waits * ctx.waitW;
       if (st.done) return sc - 1000 + k;
       sc += field[st.x * N + st.y] - st.hits;
       return sc;
@@ -269,7 +287,7 @@ export function createAutoPlayer() {
     };
     const root = {
       x: g.player.x, y: g.player.y, turn: g.turn, mons: local,
-      dmg: 0, dmgMax: 0, hits: 0, kills: 0, done: false,
+      dmg: 0, dmgMax: 0, hits: 0, kills: 0, waits: 0, k: 0, done: false,
     };
     let best = null;
     for (let s = 0; s < 8; s++) {
@@ -284,8 +302,14 @@ export function createAutoPlayer() {
   function dungeonKeys(g) {
     const p = g.player;
     const ah = g.abilityHp;
-    if (g.floor !== lastFloor) { lastFloor = g.floor; floorTicks = 0; }
-    floorTicks++;
+    if (g.floor !== lastFloor) {
+      lastFloor = g.floor;
+      stall = 0;
+      prevTurn = g.turn;
+      prevAlive = Infinity;
+      prevTarget = -1;
+      bestDist.clear();
+    }
 
     const living = [];
     for (let i = 0; i < g.monsterNumber; i++) if (g.monsters[i].alive) living.push(g.monsters[i]);
@@ -298,6 +322,7 @@ export function createAutoPlayer() {
     const cost = new Float64Array(N * N);
     const stop = new Uint8Array(N * N);
     let stair = -1;
+    let worth = 0; // 壊す手間より価値が大きい箱の数
     for (let x = 0; x < N; x++) {
       for (let y = 0; y < N; y++) {
         const t = g.land[x][y];
@@ -307,11 +332,14 @@ export function createAutoPlayer() {
         if (c === STAIR) { cost[i] = 1; stop[i] = 1; stair = i; }
         else if (c <= PURPLE_BOX) {
           // 箱は壊して進める。損な箱（赤箱など）は通り抜けるだけでも価値の分だけ重くする
-          cost[i] = hitsToBreak(p.atk, t) + 1 + Math.max(0, -values[c]);
+          const hits = hitsToBreak(p.atk, t);
+          cost[i] = hits + 1 + Math.max(0, -values[c]);
+          if (values[c] > hits) worth++;
         } else if (c === WALL) cost[i] = p.condition === WALL_BREAK && !isEdge(x, y) ? hitsToBreak(p.atk, t) + 1 : Infinity;
         else cost[i] = 1;
       }
     }
+    const plain = cost.slice(); // モンスターを考えないコスト
     // モンスターの周りを通りにくくする（倒せる相手は軽く、即死級は重く）
     if (!stealth) {
       for (const m of living) {
@@ -346,6 +374,7 @@ export function createAutoPlayer() {
       bestScore = 0;
     }
     const wallBreak = p.condition === WALL_BREAK;
+    const sw = stepWeight(g);
     for (let i = 0; i < N * N; i++) {
       const c = cond[i];
       if (c > PURPLE_BOX && !(wallBreak && c === WALL)) continue;
@@ -353,7 +382,7 @@ export function createAutoPlayer() {
       const after = toStair && toStair[i] < Infinity ? toStair[i] : base;
       // 壁掘り中は壁も 1 枚 +10 ターン
       const value = c === WALL ? values.turnGain : values[c];
-      const score = fwd.dist[i] + after - base - value;
+      const score = (fwd.dist[i] + after - base) * sw - value;
       if (score < bestScore) { bestScore = score; goal = i; }
     }
 
@@ -363,9 +392,12 @@ export function createAutoPlayer() {
       for (let i = 0; i < g.monsterNumber; i++) {
         const m = g.monsters[i];
         if (!m.alive || cheb(m.x, m.y, p.x, p.y) > SEARCH_RADIUS) continue;
+        const avg = avgDamage(m.atk, p.def);
+        const hitsLeft = Math.ceil(m.hp / avgDamage(p.atk, m.def));
         local.push({
-          x: m.x, y: m.y, hp: m.hp, def: m.def, exp: m.exp, alive: true, ability: m.ability,
-          avg: avgDamage(m.atk, p.def), max: maxDamage(m.atk, p.def),
+          x: m.x, y: m.y, hp: m.hp, hp0: m.maxHp, def: m.def, exp: m.exp, alive: true, ability: m.ability,
+          avg, max: maxDamage(m.atk, p.def),
+          safe: hitsLeft > 1 && hitsLeft * avg < p.hp * 0.4,
         });
         cond[m.x * N + m.y] = ROOM; // 先読みではモンスター側の座標で管理する
       }
@@ -383,14 +415,55 @@ export function createAutoPlayer() {
     for (let j = goal; j !== start && j >= 0; j = fwd.prev[j]) {
       if (j !== goal && (cond[j] <= PURPLE_BOX || cond[j] === WALL)) target = j;
     }
-    const targetHits = cond[target] <= PURPLE_BOX || cond[target] === WALL ? hitsToBreak(p.atk, g.land[(target / N) | 0][target % N]) : 1;
+    const tt = g.land[(target / N) | 0][target % N];
+    const targetIsBlock = cond[target] <= PURPLE_BOX || cond[target] === WALL;
+    const targetHits = targetIsBlock ? hitsToBreak(p.atk, tt) : 1;
+
+    // ---- 足踏みの検出: 箱を壊す/叩く、敵を倒す、目的地にこれまでより近づく、のどれも無い手を数える
+    let progressed = g.turn > prevTurn || living.length < prevAlive;
+    if (targetIsBlock && target === prevTarget && tt.hp < prevTargetHp) progressed = true;
+    const gd = fwd.dist[goal];
+    if (!(gd >= (bestDist.get(goal) ?? Infinity))) { bestDist.set(goal, gd); progressed = true; }
+    stall = progressed ? 0 : stall + 1;
+    prevTurn = g.turn;
+    prevAlive = living.length;
+    prevTarget = target;
+    prevTargetHp = tt.hp;
+
+    // ---- 全体攻撃で経験値を稼ぐ（数回で全員倒せるときだけ）
+    if (ah[0] > 0 && living.length >= 3) {
+      const zd = Math.floor((p.atk * 0.9) / Math.max(1, g.monsters[0].def));
+      const maxHp = living.reduce((mx, m) => Math.max(mx, m.hp), 0);
+      const casts = zd > 0 ? Math.ceil(maxHp / zd) : Infinity;
+      const incoming = local.reduce((sum, m) => sum + (cheb(m.x, m.y, p.x, p.y) <= 2 ? m.max : 0), 0);
+      if ((casts === 1 || (casts <= 3 && ah[0] >= casts * 2)) && incoming * casts < p.hp * 0.5) return ['Z'];
+    }
+
+    // ---- 全消去を使う場面（紫箱は残るので、壁も敵も消えて一直線に進める）
+    if (ah[2] > 0) {
+      // 赤箱を掘らないと進めない
+      const throughRed = cond[target] === RED_BOX && goal !== target;
+      // もう壊す価値のある箱が無く、敵を避けるために大回りさせられている
+      const plainStair = stair >= 0 ? dijkstra(plain, stop, start, false).dist[stair] : Infinity;
+      const blocked = worth <= 2 && goal === stair && stairDist - plainStair > 10;
+      if (throughRed || blocked || stall >= STALL_HARD) return ['C'];
+    }
+    if (stall >= STALL_HARD && living.length > 0) {
+      if (ah[3] > 0) return ['D'];
+      if (ah[4] > 0) return ['Enter'];
+    }
+
     const field = dijkstra(cost, stop, target, true).dist;
     for (let i = 0; i < N * N; i++) if (field[i] === Infinity) field[i] = 5000;
 
     const hpBudget = p.hp;
     const deathCost = ah[5] > 0 ? 3000 : DEATH;
-    const killW = 2;
-    const best = tactical(g, { field, target, targetHits, local, cond, hpBudget, deathCost, killW });
+    // 進展が無いときは「待って倒す」をやめ、さらに続くなら多少の被弾も受け入れて進む
+    const soft = stall >= STALL_SOFT;
+    const killW = soft ? 0 : 2;
+    const waitW = soft ? 2 : 0.3;
+    const dmgScale = stall >= STALL_HARD ? 0.3 : 1;
+    const best = tactical(g, { field, target, targetHits, local, cond, hpBudget, deathCost, killW, waitW, dmgScale });
 
     // ---- 避けきれない（死ぬ）ならコマンドで切り抜ける
     const doomed = !best || best.v >= deathCost - 100;
@@ -398,10 +471,15 @@ export function createAutoPlayer() {
     const threatened = local.some((m) => cheb(m.x, m.y, p.x, p.y) <= 2);
     if (doomed || (hurt && threatened)) {
       if (ah[1] > 0 && p.hp < p.maxHp * 0.6 && !local.some((m) => m.max >= p.maxHp)) return ['X'];
-      if (ah[4] > 0 && doomed) return ['Enter'];
-      if (ah[3] > 0 && doomed) return ['D'];
-      if (ah[2] > 0 && doomed) return ['C'];
-      if (ah[0] > 0 && doomed) return ['Z'];
+      if (doomed) {
+        // 箱がまだおいしい階では箱化（箱が増える）、そうでなければ全消去か次の階へ
+        if (ah[3] > 0 && worth > 2) return ['D'];
+        if (ah[2] > 0 && ah[2] >= ah[4]) return ['C'];
+        if (ah[4] > 0) return ['Enter'];
+        if (ah[2] > 0) return ['C'];
+        if (ah[3] > 0) return ['D'];
+        if (ah[0] > 0) return ['Z'];
+      }
     }
     if (!best) return STEPS[(g.turn * 7) % 8][2];
     return STEPS[best.s][2];
