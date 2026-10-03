@@ -3,7 +3,7 @@
 // DOM には依存しない（描画は renderer.js、音は audio.js が g を読んで行う）。
 
 import {
-  ENTRANCE, DUNGEON, HOWTO_PLAY, OPTIONS, GAME_OVER, GAME_CLEAR, MUSEUM,
+  ENTRANCE, DUNGEON, HOWTO_PLAY, OPTIONS, GAME_OVER, GAME_CLEAR, MUSEUM, BLESSING,
   BLUE_BOX, RED_BOX, YELLOW_BOX, GREEN_BOX, PURPLE_BOX, STAIR, WALL, ROOM, ENEMY,
   LAND_NUMBER, NO_ABILITY, WALL_BREAK, SLOW, BOX_ATTACK, TURN_CONST, STEALTH,
   MONSTER_MAX, DIFFICULTY_NAMES, SCREEN, FONT_SIZE,
@@ -28,6 +28,14 @@ function makeStatus() {
   };
 }
 
+// 1 回の冒険の集計（リザルト画面と記録用。ゲームの進行には影響しない）
+function makeStats() {
+  return {
+    boxes: [0, 0, 0, 0, 0], walls: 0, kills: 0, maxDamage: 0, damageTaken: 0,
+    commands: 0, revives: 0, blessings: 0, turns: 0, auto: false,
+  };
+}
+
 // ゲーム状態（VB6 の Public 変数群）
 export const g = {
   mode: ENTRANCE,
@@ -49,7 +57,19 @@ export const g = {
   demo: [], // How to play 画面の見本スプライト
   mapColors: [], // ColorSet で読む基準色
   saveExists: false,
+  // ---- ここから下はブラウザ版独自
+  events: [], // 演出用イベント（renderer / sfx が毎フレーム取り出す）
+  stats: makeStats(),
+  records: { best: 0, runs: [] }, // 冒険の記録（上位 10 件）
+  result: null, // 直近の冒険の結果（GameOver / GameClear 画面用）
+  arrange: true, // アレンジルール（10 階ごとの祝福）。false なら VB6 版そのまま
+  blessing: null, // 祝福の選択画面の状態 { options, cursor, lock }
 };
+
+// 演出用イベントを積む。取り出す側が居ない（ヘッドレス）ときは溜めすぎない。
+function emit(t, data) {
+  if (g.events.length < 256) g.events.push({ t, ...data });
+}
 
 let mapImage = null;
 let storage = {
@@ -62,6 +82,10 @@ let storage = {
 export function initGame(mapImg, store) {
   mapImage = mapImg;
   if (store) storage = store;
+  const rec = storage.loadRecords?.();
+  g.records = { best: rec?.best ?? 0, runs: Array.isArray(rec?.runs) ? rec.runs : [] };
+  g.arrange = rec?.arrange !== false;
+  g.events.length = 0;
   // Form_Load
   g.mode = ENTRANCE;
   musicSet();
@@ -127,9 +151,13 @@ export function keyDown(key) {
       switch (key) {
         case 'Right': p.direction *= DIR_RIGHT; break;
         case 'Left': p.direction *= DIR_LEFT; break;
+        case 'Up': case 'Down': g.arrange = !g.arrange; saveRecords(); emit('select'); break;
         case 'X': backToEntrance(); break;
         case 'Enter': g.mode = DUNGEON; landSet(); monsterSet(); floorSet(); break;
       }
+      break;
+    case BLESSING:
+      blessingKey(key);
       break;
     case GAME_OVER:
     case GAME_CLEAR:
@@ -177,6 +205,9 @@ export function tick() {
       wordSet();
       movement();
       break;
+    case BLESSING:
+      if (g.blessing.lock > 0) g.blessing.lock--;
+      break;
   }
 }
 
@@ -214,6 +245,7 @@ function movement() {
         p.direction = DIR_NONE;
       }
       g.turn--;
+      g.stats.turns++;
 
       for (let i = 0; i < g.monsterNumber; i++) {
         const m = g.monsters[i];
@@ -227,14 +259,17 @@ function movement() {
 
       if (g.sumDamage > 0) {
         g.words[3] = `プレイヤーは${g.sumDamage}ダメージを受けた`;
+        g.stats.damageTaken += g.sumDamage;
+        emit('hurt', { dmg: g.sumDamage, ratio: g.sumDamage / p.maxHp });
         g.sumDamage = 0;
       }
       break;
     }
 
     case HOWTO_PLAY: {
-      if (p.direction % 5 === 0) p.condition = (p.condition + 1) % 6;
-      else if (p.direction % 7 === 0) p.condition = p.condition === 0 ? 5 : p.condition - 1;
+      const pages = HOWTO_PAGES.length;
+      if (p.direction % 5 === 0) p.condition = (p.condition + 1) % pages;
+      else if (p.direction % 7 === 0) p.condition = p.condition === 0 ? pages - 1 : p.condition - 1;
       p.direction = DIR_NONE;
       setupDemo(p.condition);
       break;
@@ -287,6 +322,7 @@ export function statusCheck(levelup) {
     p.hp += dHp;
     p.atk = cLng(p.atk * 1.1 + 1);
     p.def++;
+    emit('level', { level: p.level });
   }
 
   if (p.atk > LIMIT_9) p.atk = LIMIT_9;
@@ -302,9 +338,10 @@ export function statusCheck(levelup) {
 
   if (p.hp <= 0 || g.turn <= 0) {
     if (g.abilityHp[5] === 0) {
-      p.hp = 0;
       p.direction = DIR_NONE;
       p.alive = false;
+      if (g.mode === DUNGEON) finishRun(g.turn <= 0 && p.hp > 0 ? 'turn' : 'hp');
+      p.hp = 0;
       g.mode = GAME_OVER;
       landSet();
       wordSet();
@@ -358,6 +395,8 @@ export function floorSet() {
       });
       g.turn = 200;
       g.monsterNumber = 10;
+      g.stats = makeStats();
+      g.result = null;
       break;
     case 20: case 40: case 60: case 80: case 100:
       g.monsterNumber += 10;
@@ -371,6 +410,7 @@ export function floorSet() {
     case 1000:
       p.direction = DIR_NONE;
       p.alive = false;
+      finishRun('clear');
       g.mode = GAME_CLEAR;
       landSet();
       wordSet();
@@ -429,6 +469,116 @@ export function floorSet() {
   }
 
   if (g.floor >= 2) statusCheck(true);
+  emit('floor', { floor: g.floor });
+  // arrange: 10 階を越えるごとに祝福を 1 つ選ぶ
+  if (g.arrange && g.floor > 1 && g.floor % 10 === 1) blessingSet();
+}
+
+// ---------------------------------------------------------------- 祝福（アレンジルール）
+
+const BLESSINGS = [
+  {
+    name: '剛力の祝福', desc: '攻撃力が\n1.5倍になる',
+    apply(p) { p.atk = cLng(p.atk * 1.5) + 2; },
+  },
+  {
+    name: '鉄壁の祝福', desc: '守備力が\n1.5倍になる',
+    apply(p) { p.def = cLng(p.def * 1.5) + 2; },
+  },
+  {
+    name: '生命の祝福', desc: '最大Hpが1.5倍になり\nHpが全快する',
+    apply(p) { p.maxHp = cLng(p.maxHp * 1.5) + 10; p.hp = p.maxHp; },
+  },
+  {
+    name: '時の祝福', desc: 'ターン数が\n200増える',
+    apply() { g.turn += 200; },
+  },
+  {
+    name: '紫の祝福', desc: '5つのコマンドの\n使用回数が1増える',
+    apply() { for (let k = 0; k <= 4; k++) g.abilityHp[k]++; },
+  },
+  {
+    name: '再生の祝福', desc: '復活の珠が\n2個手に入る',
+    apply() { g.abilityHp[5] += 2; },
+  },
+  {
+    name: '衰弱の祝福', desc: '全てのモンスターの\n攻撃力が半分になる',
+    apply() { for (const m of g.monsters) m.atk = cLng(m.atk / 2); },
+  },
+  {
+    name: '豊穣の祝福', desc: 'このフロアの箱が\n全て緑色になる',
+    apply() {
+      for (const col of g.land) for (const b of col) if (b.condition <= GREEN_BOX) b.condition = GREEN_BOX;
+    },
+  },
+];
+
+export function blessingInfo(id) {
+  return BLESSINGS[id];
+}
+
+function blessingSet() {
+  const pool = BLESSINGS.map((_, i) => i);
+  const options = [];
+  for (let k = 0; k < 3; k++) options.push(pool.splice(vbInt(rnd() * pool.length), 1)[0]);
+  // lock: 降りてきた勢いのキー入力で誤って決定しないよう、少しの間入力を受け付けない
+  g.blessing = { options, cursor: 1, lock: 8, floor: g.floor - 1 };
+  g.mode = BLESSING;
+  emit('bless');
+}
+
+function blessingKey(key) {
+  const b = g.blessing;
+  if (b.lock > 0) return;
+  switch (key) {
+    case 'Left': b.cursor = (b.cursor + 2) % 3; emit('select'); break;
+    case 'Right': b.cursor = (b.cursor + 1) % 3; emit('select'); break;
+    case 'Enter': case 'Z': {
+      const chosen = BLESSINGS[b.options[b.cursor]];
+      chosen.apply(g.player);
+      g.stats.blessings++;
+      g.mode = DUNGEON;
+      g.player.direction = DIR_NONE;
+      g.words[1] = `${chosen.name}を受けた。`;
+      statusCheck(false);
+      emit('blessed', { name: chosen.name });
+      break;
+    }
+  }
+}
+
+// ---------------------------------------------------------------- 記録・称号
+
+const TITLES = [
+  [1000, '果報者'], [500, '箱に愛されし者'], [300, '深淵の住人'], [200, '深淵を覗く者'],
+  [100, '百階の覇者'], [75, '不思議の探求者'], [50, '迷宮の常連'], [30, '箱の目利き'],
+  [20, 'スライム狩り'], [10, '箱開け見習い'], [5, '駆け出しの探索者'], [0, '箱を知らぬ者'],
+];
+
+export function titleFor(floor) {
+  return TITLES.find(([f]) => floor >= f)[1];
+}
+
+function saveRecords() {
+  storage.saveRecords?.({ best: g.records.best, runs: g.records.runs, arrange: g.arrange });
+}
+
+// 冒険の終わり（cause: 'hp' | 'turn' | 'clear'）。オートプレイの結果は自己ベストに数えない。
+function finishRun(cause) {
+  const p = g.player;
+  const r = g.records;
+  const run = {
+    floor: g.floor, level: p.level, cause, arrange: g.arrange,
+    difficulty: p.ability, auto: g.stats.auto, date: Date.now(),
+  };
+  const newBest = !run.auto && run.floor > r.best;
+  if (newBest) r.best = run.floor;
+  r.runs.push(run);
+  r.runs.sort((a, b) => b.floor - a.floor || b.date - a.date);
+  if (r.runs.length > 10) r.runs.length = 10;
+  g.result = { ...run, newBest, rank: r.runs.indexOf(run) + 1 };
+  saveRecords();
+  emit(cause === 'clear' ? 'clear' : 'gameover', { newBest });
 }
 
 function positionCheckPlayer() {
@@ -525,6 +675,8 @@ function battlePlayerTile(x, y) {
   const damage = calcDamage(g.player.atk, t.def);
   t.hp -= damage;
   g.words[2] = `${tileName(t.condition)}は${damage}ダメージを受けた`;
+  if (damage > g.stats.maxDamage) g.stats.maxDamage = damage;
+  emit('hit', { x, y, dmg: damage, tile: true });
   if (t.hp <= 0) {
     t.hp = 0;
     t.ability = vbInt(rnd() * 15);
@@ -540,11 +692,15 @@ function battlePlayerMonster(i) {
   const damage = calcDamage(g.player.atk, m.def);
   m.hp -= damage;
   g.words[2] = `${m.name}は${damage}ダメージを受けた`;
+  if (damage > g.stats.maxDamage) g.stats.maxDamage = damage;
+  emit('hit', { x: m.x, y: m.y, dmg: damage });
   if (m.hp <= 0) {
     m.hp = 0;
     m.alive = false;
     g.land[m.x][m.y].condition = ROOM;
     g.player.exp += m.exp;
+    g.stats.kills++;
+    emit('kill', { x: m.x, y: m.y });
   }
 }
 
@@ -717,6 +873,7 @@ function landSet() {
 
 function boxEffect(x, y) {
   const t = g.land[x][y];
+  const box = t.condition;
   const p = g.player;
   const ms = g.monsters;
   const eachBox = (pred, fn) => {
@@ -901,6 +1058,10 @@ function boxEffect(x, y) {
       break;
   }
 
+  if (box <= PURPLE_BOX) g.stats.boxes[box]++;
+  else g.stats.walls++;
+  emit('box', { x, y, box, text: t.explanation });
+
   statusCheck(false);
   g.words[1] = t.explanation;
   t.ability = 0;
@@ -929,17 +1090,22 @@ function abilityEffect(key) {
     case 'Z': // 全体攻撃
       if (ah[0] > 0) {
         ah[0]--;
+        g.stats.commands++;
+        emit('cmd', { key });
         let damage = vbInt((p.atk * (rnd() * 0.2 + 0.9)) / g.monsters[0].def);
         if (damage > LIMIT_7) damage = LIMIT_7;
         for (let i = 0; i < g.monsterNumber; i++) {
           const m = g.monsters[i];
           if (!m.alive) continue;
           m.hp -= damage;
+          emit('hit', { x: m.x, y: m.y, dmg: damage });
           if (m.hp <= 0) {
             m.hp = 0;
             m.alive = false;
             g.land[m.x][m.y].condition = ROOM;
             p.exp += m.exp;
+            g.stats.kills++;
+            emit('kill', { x: m.x, y: m.y });
           }
           g.words[2] = `全てのモンスターは${damage}ダメージを受けた`;
         }
@@ -951,12 +1117,16 @@ function abilityEffect(key) {
       if (ah[1] > 0) {
         ah[1]--;
         p.hp = p.maxHp;
+        g.stats.commands++;
+        emit('cmd', { key });
       }
       break;
 
     case 'C': // 全消去
       if (ah[2] > 0) {
         ah[2]--;
+        g.stats.commands++;
+        emit('cmd', { key });
         for (const col of g.land) {
           for (const t of col) {
             if (t.condition <= GREEN_BOX || t.condition === WALL) t.condition = ROOM;
@@ -977,6 +1147,8 @@ function abilityEffect(key) {
     case 'D':
       if (ah[3] > 0 && p.alive) { // モンスター箱化
         ah[3]--;
+        g.stats.commands++;
+        emit('cmd', { key });
         for (let i = 0; i < g.monsterNumber; i++) {
           const m = g.monsters[i];
           if (m.alive) {
@@ -993,6 +1165,8 @@ function abilityEffect(key) {
         if (p.condition !== TURN_CONST) g.turn += 100;
         p.condition = NO_ABILITY;
         g.words[3] = '復活の珠の効果で復活した。';
+        g.stats.revives++;
+        emit('revive');
         statusCheck(false);
       }
       break;
@@ -1017,6 +1191,8 @@ function abilityEffect(key) {
             exp: m0.exp, level: m0.level, ability: m0.ability,
           },
           monsterNumber: g.monsterNumber,
+          arrange: g.arrange,
+          stats: g.stats,
         });
         g.mode = ENTRANCE;
         landSet();
@@ -1031,6 +1207,10 @@ function abilityEffect(key) {
       g.mode = DUNGEON;
       landSet();
       monsterSet();
+      // セーブした冒険の続きとして集計とルールを引き継ぐ
+      g.stats = { ...makeStats(), ...d.stats, boxes: [...(d.stats?.boxes ?? [0, 0, 0, 0, 0])] };
+      g.result = null;
+      if (typeof d.arrange === 'boolean') g.arrange = d.arrange;
       for (const m of g.monsters) {
         m.maxHp = d.monster.maxHp;
         m.hp = m.maxHp;
@@ -1047,6 +1227,8 @@ function abilityEffect(key) {
     case 'Enter': // 次の階へ
       if (ah[4] > 0) {
         ah[4]--;
+        g.stats.commands++;
+        emit('cmd', { key });
         floorSet();
       }
       break;
@@ -1055,18 +1237,43 @@ function abilityEffect(key) {
 
 // ---------------------------------------------------------------- WordModule
 
+// GameOver / GameClear 画面の冒険の結果（w[from]..w[from+3]）
+function resultWords(from) {
+  const w = g.words;
+  const r = g.result;
+  const s = g.stats;
+  for (let i = from; i < from + 4; i++) w[i] = '';
+  if (!r) return;
+  const b = s.boxes;
+  w[from] = `到達 ${r.floor}F  Lv${r.level}${r.auto ? '  (オートプレイ)' : ''}\n称号「${titleFor(r.floor)}」`;
+  w[from + 1] = r.newBest ? '★ 自己ベスト更新！ ★' : `自己ベスト ${g.records.best}F`;
+  w[from + 2] = `壊した箱 ${b[0] + b[1] + b[2] + b[3] + b[4]} (青${b[0]} 赤${b[1]} 黄${b[2]} 緑${b[3]} 紫${b[4]})`;
+  w[from + 3] = `倒したモンスター ${s.kills}  最大ダメージ ${s.maxDamage}`;
+}
+
+// 記録の部屋の冒険の記録（w[5]..w[8]）
+function recordWords() {
+  const w = g.words;
+  const r = g.records;
+  w[5] = '';
+  w[6] = r.best > 0 ? `最高記録 ${r.best}F「${titleFor(r.best)}」` : '冒険の記録はまだありません。';
+  w[7] = r.runs.slice(0, 3).map((run, i) =>
+    `${i + 1}. ${run.floor}F Lv${run.level} ${run.arrange ? 'アレンジ' : 'オリジナル'}${run.auto ? ' (オート)' : ''}`).join('\n');
+  w[8] = '';
+}
+
 const BACK_HELP = '(xキーでメニュー画面に戻る,左右キーでページ選択)';
 
 const HOWTO_PAGES = [
   [
-    'How to play\n1/6',
+    'How to play\n1/7',
     '\nこのゲームは勘でも何とかなるゲームです。',
     'なので、説明を読むのが嫌いな人は、\nここは読み飛ばしても大丈夫です。',
     '\n', '\n', '\n', '\n', '\n',
     `\n${BACK_HELP}`,
   ],
   [
-    'How to play\n2/6',
+    'How to play\n2/7',
     'このゲームはモンスターを倒しながら、\n下の階を目指して階段を降りていくゲームです。',
     'プレイヤー　　　                     \nモンスター　　　                     ',
     '階段　　　                     \n(階段はマウスポインタと見間違えやすいので注意して下さい。)',
@@ -1077,7 +1284,7 @@ const HOWTO_PAGES = [
     `\n${BACK_HELP}`,
   ],
   [
-    'How to play\n3/6',
+    'How to play\n3/7',
     'ダンジョンに出現する5つの箱\n',
     '青箱・・・壊すとHPが回復し、モンスターが普通の状態に戻る。\n赤箱・・・壊すとマイナス効果が発生する。',
     '黄箱・・・壊すと色々な効果が発生する\n緑箱・・・壊すとプラス効果が発生する。',
@@ -1088,7 +1295,7 @@ const HOWTO_PAGES = [
     `\n${BACK_HELP}`,
   ],
   [
-    'How to play\n4/6',
+    'How to play\n4/7',
     'ダンジョン内で使える5つのコマンド\n',
     'zキー...敵全員に攻撃\nxキー...Hpを全快させる',
     'cキー...紫箱以外の全ての箱、壁、モンスターを消去する。\ndキー...モンスターを箱に変化させる',
@@ -1098,7 +1305,7 @@ const HOWTO_PAGES = [
     `\n${BACK_HELP}`,
   ],
   [
-    'How to play\n5/6',
+    'How to play\n5/7',
     'セーブ/ロードについて\n',
     'ゲームを中断したくなった時はSボタンを押すとセーブが出来ます。\n再開したい時は記録の部屋からロードできます。',
     'セーブすると、以前のデータは消えてしまうので、注意して下さい。\n',
@@ -1109,7 +1316,7 @@ const HOWTO_PAGES = [
     `\n${BACK_HELP}`,
   ],
   [
-    'How to play\n6/6',
+    'How to play\n6/7',
     'ダンジョンで大事な6つのステータス\n',
     'レベル\nこれが上がると、全体的に強くなります。',
     '攻撃力\nこの数値が大きいほど、与えるダメージが大きくなります。',
@@ -1118,6 +1325,17 @@ const HOWTO_PAGES = [
     '最大Hp\nHpの最大値です。Hpはこれ以上には回復しません。',
     '経験値\nこれが貯まるとレベルアップしていきます。',
     `モンスターを倒すと、その経験値が自分のものになります。\n${BACK_HELP}`,
+  ],
+  [
+    'How to play\n7/7',
+    'ブラウザ版のアレンジ要素\n',
+    '祝福・・・10階を越えるごとに、3つの祝福から1つを選べます。\n(左右キーで選択、Enterキーで決定)',
+    'Optionでルールを「オリジナル」にすると、祝福は現れません。\n',
+    '記録と称号\n',
+    '冒険が終わると、到達した階が記録の部屋に残ります。\n最も深く潜った階に応じて称号が付きます。',
+    '画面右下には攻撃力・守備力と、\nモンスターの強さが表示されています。',
+    '\n',
+    `\n${BACK_HELP}`,
   ],
 ];
 
@@ -1131,7 +1349,7 @@ export function wordSet() {
       w[1] = 'ダンジョンに入る(Enterキー)\n不思議の箱を駆使する冒険が始まります。\n';
       w[2] = 'How to play(zキー)\n操作説明や概要説明など\n';
       w[3] = 'Option(cキー)\n難易度を設定\n';
-      w[4] = 'Museum(dキー)\n記録の部屋\n\n(Mキーで音楽のON/OFF)';
+      w[4] = `Museum(dキー)\n記録の部屋\n${g.records.best > 0 ? `最高記録 ${g.records.best}F「${titleFor(g.records.best)}」` : ''}\n(Mキーで音楽のON/OFF)`;
       w[5] = '\n音楽素材提供元';
       w[6] = '【サイト名】フリー音楽素材 H/MIX GALLERY\n【管理者】　秋山裕和';
       w[7] = '【アドレス】http://www.hmix.net/\n';
@@ -1171,17 +1389,19 @@ export function wordSet() {
       w[0] = 'Options\n';
       w[1] = `${DIFFICULTY_NAMES[p.ability]}\n`;
       w[2] = '低い難易度ほど紫箱で良い効果が出やすいです。\n';
-      w[3] = '\n';
-      w[4] = 'xキーでメニュー画面に戻る,左右キーで難易度選択\nEnterキーでダンジョンに入る。';
+      w[3] = `ルール: ${g.arrange ? 'アレンジ' : 'オリジナル'}\n${g.arrange ? '10階を越えるごとに祝福を選べます。' : 'VB6版そのままのルールです。'}\n`;
+      w[4] = 'xキーでメニュー画面に戻る\n左右キーで難易度選択,上下キーでルール選択\nEnterキーでダンジョンに入る。';
+      for (let i = 5; i <= 8; i++) w[i] = '';
       break;
 
     case GAME_OVER:
       g.foreColor = '#ffffff';
       w[0] = 'GameOver';
       w[1] = '';
-      w[2] = 'プレイヤーは力尽きた';
+      w[2] = g.result?.cause === 'turn' ? 'ターン数が尽きた' : 'プレイヤーは力尽きた';
       w[3] = '';
-      w[4] = 'xキーでメニュー画面に戻る';
+      resultWords(4);
+      w[8] = '\nxキーでメニュー画面に戻る';
       break;
 
     case GAME_CLEAR:
@@ -1191,11 +1411,13 @@ export function wordSet() {
       w[1] = '\nこのゲームをここまで遊んでくれたあなたは果報者です。';
       w[2] = 'クリア時のステータス\n';
       w[3] = `HP ${vbInt(p.hp)}/${p.maxHp}\nLv ${p.level}`;
-      w[4] = '\nxキーでメニュー画面に戻る';
+      resultWords(4);
+      w[8] = '\nxキーでメニュー画面に戻る';
       break;
 
     case MUSEUM:
       w[0] = '現在の記録\n';
+      recordWords();
       if (!g.saveExists) {
         w[1] = '\nセーブデータがありません。';
         w[2] = 'ダンジョン内でSキーを押してから階段を降りると\nセーブできます。';

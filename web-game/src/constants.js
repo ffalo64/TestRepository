@@ -8,6 +8,7 @@ export const OPTIONS = 3;
 export const GAME_OVER = 4;
 export const GAME_CLEAR = 5;
 export const MUSEUM = 6;
+export const BLESSING = 7; // ブラウザ版独自: 祝福の選択画面
 
 // Landsquare.Condition
 export const BLUE_BOX = 0;

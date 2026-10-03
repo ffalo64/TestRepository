@@ -1,5 +1,6 @@
 // オートプレイのヘッドレス評価。使い方: node test/autoplay.js [games=20] [maxTicks=200000]
-// 環境変数: GOAL=到達率を数える階 (既定 100), STOP=この階に着いたら打ち切る, SEED0=最初の seed
+// 環境変数: GOAL=到達率を数える階 (既定 100), STOP=この階に着いたら打ち切る, SEED0=最初の seed,
+//           ARRANGE=0 でオリジナルルール（祝福なし）
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,6 +30,7 @@ const t0 = Date.now();
 for (let seed = SEED0; seed < SEED0 + GAMES; seed++) {
   setRandom(mulberry32(seed));
   initGame(mapImg, null);
+  g.arrange = process.env.ARRANGE !== '0';
   const ai = createAutoPlayer();
   let maxFloor = 0;
   let result = 'timeout';

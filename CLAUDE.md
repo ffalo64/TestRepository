@@ -5,11 +5,16 @@
 - `Images/` `Sounds/` が元アセット。ブラウザ版は `web-game/public/` にコピーしたものを使う。
 - `web-game/` がブラウザ版（Vite + 素の ES modules）。
   - `npm run dev` → http://localhost:5173/
-  - `npm test` → Node でのヘッドレス動作テスト（`test/headless.js`）
-  - `npm run autoplay [games] [maxTicks]` → オートプレイ AI の成績（到達階・死因・100F 到達率・足踏み率）を集計（`test/autoplay.js`。環境変数 `GOAL` `STOP` `SEED0`）
+  - `npm test` → Node でのヘッドレス動作テスト（`test/headless.js`）と、Canvas / Web Audio をモックにした描画・演出の smoke テスト（`test/render.js`）
+  - `npm run autoplay [games] [maxTicks]` → オートプレイ AI の成績（到達階・死因・100F 到達率・足踏み率）を集計（`test/autoplay.js`。環境変数 `GOAL` `STOP` `SEED0`、`ARRANGE=0` でオリジナルルール）
   - `src/engine.js` は DOM 非依存のゲームロジック（VB6 の各 Sub を移植）。描画は `renderer.js`、音は `audio.js`、入力は `main.js`。
   - `src/autoplay.js` はブラウザ版独自のオートプレイ AI（P キーで OFF → 等速 → 4 倍速）。DOM 非依存で、`nextKeys(g)` が返すキーを `keyDown()` に渡す。エンジンには手を入れない。
-    戦略は箱の期待値（ターン換算）と Dijkstra（箱を壊して進む経路込み）で目的地を選び、戦術は近くのモンスターの動きを 4 手先までシミュレーションして被弾を避ける。進展の無い手が続くと足踏みとみなし、待ち伏せをやめて全消去などで打開する。100F 到達率は約 75%（144 ゲーム）、足踏みは全手数の約 1%（`npm run autoplay` の `stall`）。
+    戦略は箱の期待値（ターン換算）と Dijkstra（箱を壊して進む経路込み）で目的地を選び、戦術は近くのモンスターの動きを 4 手先までシミュレーションして被弾を避ける。進展の無い手が続くと足踏みとみなし、待ち伏せをやめて全消去などで打開する。100F 到達率はオリジナルルールで約 75%（144 ゲーム）、アレンジルールで約 70%（48 ゲーム）、足踏みは全手数の約 1%（`npm run autoplay` の `stall`）。
+
+## ブラウザ版独自の要素（VB6 版には無い）
+- **演出と効果音**: エンジンは出来事を `g.events` に積むだけ（`emit()`）。`effects.js`（ダメージ数字・破片・揺れ・箱の効果のバナー）と `sfx.js`（Web Audio で合成）が毎フレーム取り出して使う。ゲームの進行には影響させない。
+- **記録と称号**: `g.stats` に冒険の集計、`g.records` に上位 10 件（localStorage `dungeon_and_box_records`）。オートプレイを使った冒険は自己ベストに数えない。
+- **アレンジルール**（`g.arrange`、Option の上下キーで切替、既定 ON）: 10 階を越えるごとに 3 つの祝福から 1 つ選ぶ（`BLESSING` モード）。ルールを変える箇所には `// arrange:` コメントを付け、`g.arrange === false` のときは VB6 版と同じ挙動（乱数列も同じ）を保つ。
 
 ## 移植方針
 - ゲームロジックは VB6 に忠実に。VB6 の Double→Long 代入は銀行丸め（`cLng`）、`Int()` は `Math.floor`。

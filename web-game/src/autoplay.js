@@ -10,7 +10,7 @@
 // - コマンド: 避けきれないときは 次の階へ / 箱化 / 全消去 / 全快 で切り抜ける。
 
 import {
-  ENTRANCE, DUNGEON, HOWTO_PLAY, OPTIONS, GAME_OVER, GAME_CLEAR, MUSEUM,
+  ENTRANCE, DUNGEON, HOWTO_PLAY, OPTIONS, GAME_OVER, GAME_CLEAR, MUSEUM, BLESSING,
   BLUE_BOX, RED_BOX, YELLOW_BOX, GREEN_BOX, PURPLE_BOX, STAIR, WALL, ROOM, ENEMY,
   LAND_NUMBER, WALL_BREAK, SLOW, STEALTH, TURN_CONST,
 } from './constants.js';
@@ -485,6 +485,18 @@ export function createAutoPlayer() {
     return STEPS[best.s][2];
   }
 
+  // 祝福（アレンジルール）: 生存に効くものを優先し、ターンが苦しいときだけ時の祝福を取る
+  // 添字は engine.js の BLESSINGS の並び
+  function blessingKeys(g) {
+    const b = g.blessing;
+    const prio = [3, 8, 5, 1, 4, 6, 7, 2];
+    if (g.turn < 150) prio[3] = 9;
+    if (g.abilityHp[5] === 0) prio[5] = 6.5;
+    let best = 0;
+    for (let k = 1; k < 3; k++) if (prio[b.options[k]] > prio[b.options[best]]) best = k;
+    return b.cursor === best ? ['Enter'] : ['Right'];
+  }
+
   return {
     // 今フレームに押すキーの配列を返す
     nextKeys(g) {
@@ -499,6 +511,8 @@ export function createAutoPlayer() {
         case OPTIONS:
           if (--wait > 0) return [];
           return ['Enter'];
+        case BLESSING:
+          return blessingKeys(g);
         case GAME_OVER:
         case GAME_CLEAR:
         case HOWTO_PLAY:

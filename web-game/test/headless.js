@@ -6,7 +6,7 @@ import { decodeBmp } from '../src/bmp.js';
 import { cLng, setRandom, mulberry32 } from '../src/vb.js';
 import { initGame, keyDown, tick, g } from '../src/engine.js';
 import {
-  ENTRANCE, DUNGEON, GAME_OVER, GAME_CLEAR, MUSEUM, STAIR, ENEMY, LAND_NUMBER,
+  ENTRANCE, DUNGEON, GAME_OVER, GAME_CLEAR, MUSEUM, BLESSING, STAIR, ENEMY, LAND_NUMBER,
 } from '../src/constants.js';
 
 const SEEDS = Number(process.argv[2] ?? 20);
@@ -16,6 +16,7 @@ const buf = fs.readFileSync(path.join(here, '../public/images/Map40.bmp'));
 const mapImg = decodeBmp(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
 
 let failures = 0;
+let blessings = 0; // 祝福の選択画面に居たフレーム数
 function fail(msg) { failures++; console.error('FAIL: ' + msg); }
 
 // ---- cLng 単体チェック
@@ -125,10 +126,14 @@ for (let seed = 1; seed <= SEEDS; seed++) {
         keyDown('D');
         if (g.mode !== MUSEUM) throw new Error(`${ctx}: D on title -> mode ${g.mode}`);
         keyDown('L');
-        if (g.mode !== DUNGEON) throw new Error(`${ctx}: load -> mode ${g.mode}`);
+        // 10 の倍数の階でセーブすると、ロード直後に祝福の選択画面になる
+        if (g.mode !== DUNGEON && g.mode !== BLESSING) throw new Error(`${ctx}: load -> mode ${g.mode}`);
         if (g.floor !== savedFloor + 1) throw new Error(`${ctx}: loaded floor ${g.floor}, saved ${savedFloor}`);
         totals.loads++;
         checkInvariants(`${ctx} (after load)`, stats);
+      } else if (g.mode === BLESSING) {
+        blessings++;
+        keyDown('Enter'); // 祝福（アレンジルール）は真ん中をそのまま選ぶ
       } else {
         throw new Error(`${ctx}: unexpected mode ${g.mode}`);
       }
@@ -144,5 +149,6 @@ for (let seed = 1; seed <= SEEDS; seed++) {
 
 console.log('---- summary');
 console.log(JSON.stringify(totals));
+if (!blessings) fail('祝福の選択画面が一度も出なかった');
 console.log(failures ? `FAILED (${failures})` : 'OK');
 process.exit(failures ? 1 : 0);
