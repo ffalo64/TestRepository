@@ -1,251 +1,410 @@
 // オートプレイ（ブラウザ版の追加機能。VB6 版には無い）。
 // 毎フレーム tick() の前に nextKeys(g) を呼び、返ってきたキーを keyDown() に渡す。
-// DOM 非依存なので test/headless.js からも使える。
+// DOM 非依存なので test/autoplay.js からも使える。
+//
+// 方針
+// - 戦略: 箱ごとに「今の状態で開けたときの期待値（ターン換算）」を出し、
+//   Dijkstra の手数との差が一番得な箱か階段を目指す。
+// - 戦術: モンスターの動き（MovementSub / PositionCheck）は決定的なので、
+//   近くのモンスターの動きを数手先までシミュレーションして、被弾しない手を選ぶ。
+// - コマンド: 避けきれないときは 次の階へ / 箱化 / 全消去 / 全快 で切り抜ける。
 
 import {
   ENTRANCE, DUNGEON, HOWTO_PLAY, OPTIONS, GAME_OVER, GAME_CLEAR, MUSEUM,
   BLUE_BOX, RED_BOX, YELLOW_BOX, GREEN_BOX, PURPLE_BOX, STAIR, WALL, ROOM, ENEMY,
-  LAND_NUMBER, WALL_BREAK, STEALTH, TURN_CONST,
+  LAND_NUMBER, WALL_BREAK, SLOW, STEALTH, TURN_CONST,
 } from './constants.js';
 
 const N = LAND_NUMBER;
 const MENU_WAIT = 30; // メニュー画面で次のキーを押すまでのフレーム数（1.5 秒）
 const RESULT_WAIT = 80; // ゲームオーバー/クリア画面を見せるフレーム数（4 秒）
 
-// 8 方向と、それを入力するキー
+// 8 方向と、それを入力するキー（engine の Direction と同じ素数の積）
 const STEPS = [
-  [0, -1, ['Up']], [0, 1, ['Down']], [1, 0, ['Right']], [-1, 0, ['Left']],
-  [1, -1, ['Up', 'Right']], [1, 1, ['Down', 'Right']],
-  [-1, 1, ['Down', 'Left']], [-1, -1, ['Up', 'Left']],
+  [0, -1, ['Up'], 2], [0, 1, ['Down'], 3], [1, 0, ['Right'], 5], [-1, 0, ['Left'], 7],
+  [1, -1, ['Up', 'Right'], 10], [1, 1, ['Down', 'Right'], 15],
+  [-1, 1, ['Down', 'Left'], 21], [-1, -1, ['Up', 'Left'], 14],
 ];
-
-const FIGHT_RISK = 1.0; // test/autoplay.js で 0.3〜3 を比べて一番深くまで潜れた値
-
-const isEdge = (x, y) => x === 0 || y === 0 || x === N - 1 || y === N - 1;
-
-// 1 回の攻撃のおおよそのダメージ（calcDamage の期待値）
-const hitDamage = (atk, def) => Math.floor(atk / Math.max(1, def)) + 1;
-const hitsToBreak = (atk, t) => Math.ceil(Math.max(1, t.hp) / hitDamage(atk, t.def));
-
-// 箱を開けたときのおおよその価値（マス数換算）。ターン +10 の分は別に足す。
-const BOX_VALUE = {
-  [BLUE_BOX]: 6,
-  [RED_BOX]: -40,
-  [YELLOW_BOX]: 4,
-  [GREEN_BOX]: 14,
-  [PURPLE_BOX]: 30,
+// engine.js の DETOURS と同じ（進めなかったモンスターの回り込み先）
+const DETOURS = {
+  2: [[-1, -1], [1, -1]], 3: [[1, 1], [-1, 1]], 5: [[1, -1], [1, 1]], 7: [[-1, 1], [-1, -1]],
+  10: [[0, -1], [1, 0]], 15: [[1, 0], [0, 1]], 21: [[0, 1], [-1, 0]], 14: [[-1, 0], [0, -1]],
 };
 
-// 倒しきるまでに受けるダメージ（other は周りの敵からの分）が HP の半分未満なら戦う
-function safeToFight(p, m, other) {
-  const hits = Math.ceil(m.hp / hitDamage(p.atk, m.def));
-  const taken = (hits - 1) * (hitDamage(m.atk, p.def) + other);
-  return taken < p.hp * FIGHT_RISK;
+// コマンド 1 回分の価値（ターン換算）。[全体攻撃, Hp全快, 全消去, 箱化, 次の階へ, 復活の珠]
+const CMD_VALUE = [10, 25, 50, 30, 60, 120];
+const SEARCH_RADIUS = 9; // これより遠いモンスターは先読みでは動かないものとして扱う
+const DEATH = 1e5;
+
+const isEdge = (x, y) => x === 0 || y === 0 || x === N - 1 || y === N - 1;
+const cheb = (ax, ay, bx, by) => Math.max(Math.abs(ax - bx), Math.abs(ay - by));
+
+// calcDamage の期待値と最大値
+const avgDamage = (atk, def) => Math.floor(atk / Math.max(1, def)) + 1;
+const maxDamage = (atk, def) => Math.floor((atk * 1.1) / Math.max(1, def)) + 1;
+const minDamage = (atk, def) => Math.floor((atk * 0.9) / Math.max(1, def)) + 1;
+const hitsToBreak = (atk, t) => Math.ceil(Math.max(1, t.hp) / avgDamage(atk, t.def));
+
+// 最小ヒープ付き Dijkstra。cost[i] はマス i に「入る」コスト（箱は壊す手数込み、壁は Infinity）。
+// stop[i] のマス（階段）からは先へ広げない。
+// reverse=true なら src に向かう距離（各マスから src まで）を求める。
+function dijkstra(cost, stop, src, reverse) {
+  const dist = new Float64Array(N * N).fill(Infinity);
+  const prev = new Int32Array(N * N).fill(-1);
+  const hd = [];
+  const hi = [];
+  const push = (d, i) => {
+    let k = hd.length;
+    hd.push(d);
+    hi.push(i);
+    while (k > 0) {
+      const pk = (k - 1) >> 1;
+      if (hd[pk] <= d) break;
+      hd[k] = hd[pk]; hi[k] = hi[pk];
+      k = pk;
+    }
+    hd[k] = d; hi[k] = i;
+  };
+  const pop = () => {
+    const d0 = hd[0];
+    const i0 = hi[0];
+    const d = hd.pop();
+    const i = hi.pop();
+    if (hd.length) {
+      let k = 0;
+      for (;;) {
+        const l = k * 2 + 1;
+        if (l >= hd.length) break;
+        const r = l + 1;
+        const m = r < hd.length && hd[r] < hd[l] ? r : l;
+        if (hd[m] >= d) break;
+        hd[k] = hd[m]; hi[k] = hi[m];
+        k = m;
+      }
+      hd[k] = d; hi[k] = i;
+    }
+    return [d0, i0];
+  };
+  dist[src] = 0;
+  push(0, src);
+  while (hd.length) {
+    const [d, i] = pop();
+    if (d > dist[i]) continue;
+    if (i !== src && stop[i]) continue;
+    const x = (i / N) | 0;
+    const y = i % N;
+    for (const [dx, dy] of STEPS) {
+      const nx = x + dx;
+      const ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
+      const j = nx * N + ny;
+      // 前向き: j に入るコスト。逆向き: j から i に入るコスト
+      const c = reverse ? (cost[j] === Infinity || stop[j] ? Infinity : cost[i]) : cost[j];
+      if (c === Infinity) continue;
+      if (d + c < dist[j]) {
+        dist[j] = d + c;
+        prev[j] = i;
+        push(d + c, j);
+      }
+    }
+  }
+  return { dist, prev };
 }
 
 export function createAutoPlayer() {
   let wait = 0;
   let lastMode = -1;
+  let lastFloor = -1;
+  let floorTicks = 0;
 
-  // 最小ヒープ（[cost, index]）
-  function dijkstra(g, cost) {
-    const dist = new Float64Array(N * N).fill(Infinity);
-    const prev = new Int32Array(N * N).fill(-1);
-    const heap = [];
-    const push = (d, i) => {
-      heap.push([d, i]);
-      let k = heap.length - 1;
-      while (k > 0) {
-        const pk = (k - 1) >> 1;
-        if (heap[pk][0] <= heap[k][0]) break;
-        [heap[pk], heap[k]] = [heap[k], heap[pk]];
-        k = pk;
-      }
+  // ---- 箱の価値（ターン換算）
+  function turnWorth(g) {
+    if (g.turn < 150) return 2;
+    if (g.turn < 400) return 1;
+    if (g.turn < 1500) return 0.5;
+    if (g.turn < 5000) return 0.2;
+    return 0.05;
+  }
+
+  function cmdSum(g, f) {
+    let s = 0;
+    for (let k = 0; k < 6; k++) s += f(g.abilityHp[k], k) * CMD_VALUE[k];
+    return s;
+  }
+
+  function boxValues(g) {
+    const p = g.player;
+    const tw = turnWorth(g);
+    const gain = p.condition === TURN_CONST ? 0 : 10 * tw;
+    const hpLost = 1 - p.hp / Math.max(1, p.maxHp);
+    // 紫箱: 出る個数の平均 × 1 個あたりの期待値（全体攻撃 3/15, 全快 4/15, 全消去 1/15, 箱化 1/15, 次の階へ 3/15, 復活 3/15）
+    const perCmd = [3, 4, 1, 1, 3, 3].reduce((s, w, k) => s + w * CMD_VALUE[k], 0) / 15;
+    const purple = perCmd * (6 - p.ability) / 2;
+    // 黄箱 15 通りの期待値
+    const yellow = (
+      cmdSum(g, () => 1) // 1: 全コマンド +1
+      + cmdSum(g, (v) => 5 - v) // 9: 全コマンドが 5 に
+      + (1000 - g.turn) * tw // 6: 残りターンが 1000 に
+      + 80 + 50 - 50 // 4: 守備×2, 5: 攻撃×2, 7: 攻撃÷2
+      + 10 - 20 - 20 - 30 - 5 // 3: 全滅, 2: ターン固定, 8: 壁掘り, 10: 箱消滅, 14: 箱攻撃
+    ) / 15;
+    const green = (hpLost * 40 + 15 + 10 + 10 + 10 + 15 + 5 + 5 + 3 + 3 + 5 + 3 + 5 + 10) / 15 + 5;
+    return {
+      turnGain: gain,
+      [BLUE_BOX]: 2 + hpLost * 30 + gain,
+      [RED_BOX]: -20 - (p.hp / Math.max(1, p.maxHp)) * 10 + gain,
+      [YELLOW_BOX]: yellow + gain,
+      [GREEN_BOX]: green + gain,
+      [PURPLE_BOX]: purple + gain,
     };
-    const pop = () => {
-      const top = heap[0];
-      const last = heap.pop();
-      if (heap.length) {
-        heap[0] = last;
-        let k = 0;
-        for (;;) {
-          const l = k * 2 + 1;
-          const r = l + 1;
-          let m = k;
-          if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
-          if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
-          if (m === k) break;
-          [heap[m], heap[k]] = [heap[k], heap[m]];
-          k = m;
-        }
+  }
+
+  // ---- 先読み用のモンスター移動シミュレーション（engine.js の movement / positionCheckMonster と同じ規則）
+  function makeSim(g, local, cond, target, targetHits) {
+    const p = g.player;
+    const stealth = p.condition === STEALTH;
+    const occupied = (mons, x, y, self) => {
+      for (let k = 0; k < mons.length; k++) {
+        const m = mons[k];
+        if (k !== self && m.alive && m.x === x && m.y === y) return true;
       }
-      return top;
+      return false;
     };
+    const isRoom = (mons, x, y, self) => cond[x * N + y] === ROOM && !occupied(mons, x, y, self);
+    const pAvg = (m) => avgDamage(p.atk, m.def);
 
-    const p = g.player;
-    const start = p.x * N + p.y;
-    dist[start] = 0;
-    push(0, start);
-    while (heap.length) {
-      const [d, i] = pop();
-      if (d > dist[i]) continue;
-      const x = (i / N) | 0;
-      const y = i % N;
-      // 箱・敵・階段は「そこに入る」ところで止まる（通り抜けはしない）
-      if (i !== start && cost[i] !== 1) continue;
-      for (const [dx, dy] of STEPS) {
-        const nx = x + dx;
-        const ny = y + dy;
-        if (nx < 0 || ny < 0 || nx >= N || ny >= N) continue;
-        const j = nx * N + ny;
-        const c = cost[j];
-        if (c === Infinity) continue;
-        if (d + c < dist[j]) {
-          dist[j] = d + c;
-          prev[j] = i;
-          push(d + c, j);
+    // st: { x, y, turn, mons, dmg, dmgMax, hits, kills, done }
+    return function step(st, s) {
+      const [, , , dir] = STEPS[s];
+      let nx = st.x;
+      let ny = st.y;
+      if (dir % 2 === 0 && ny > 0) ny--;
+      if (dir % 3 === 0 && ny < N - 1) ny++;
+      if (dir % 5 === 0 && nx < N - 1) nx++;
+      if (dir % 7 === 0 && nx > 0) nx--;
+      const mons = st.mons.map((m) => ({ ...m }));
+      const ns = { ...st, mons, x: st.x, y: st.y, turn: st.turn - 1 };
+      const i = nx * N + ny;
+      const c = cond[i];
+      const mk = mons.findIndex((m) => m.alive && m.x === nx && m.y === ny);
+      if (mk >= 0) {
+        // 攻撃。倒しきれなければその場に残る
+        const m = mons[mk];
+        m.hp -= pAvg(m);
+        if (m.hp <= 0) { m.alive = false; ns.kills += m.exp; }
+      } else if (c === STAIR) {
+        if (i !== target) return null; // 目的地でない階段は踏まない
+        ns.done = true;
+        return ns;
+      } else if (c <= PURPLE_BOX || c === WALL) {
+        if (i === target) {
+          ns.hits++;
+          if (ns.hits >= targetHits) { ns.done = true; return ns; }
+        }
+      } else if (c === ROOM) {
+        ns.x = nx;
+        ns.y = ny;
+      }
+      // ENEMY（先読み対象外の遠いモンスター）・壁はぶつかるだけ
+      if (stealth) return ns;
+      for (let k = 0; k < mons.length; k++) {
+        const m = mons[k];
+        if (!m.alive) continue;
+        if (m.ability === SLOW && ns.turn % 2 !== 0) continue;
+        const ox = m.x;
+        const oy = m.y;
+        let d = 1;
+        if (m.y > ns.y) { m.y--; d *= 2; }
+        if (m.y < ns.y) { m.y++; d *= 3; }
+        if (m.x < ns.x) { m.x++; d *= 5; }
+        if (m.x > ns.x) { m.x--; d *= 7; }
+        if (m.x === ns.x && m.y === ns.y) {
+          m.x = ox; m.y = oy;
+          ns.dmg += m.avg;
+          ns.dmgMax += m.max;
+        } else if (!isRoom(mons, m.x, m.y, k) || (m.x === ox && m.y === oy)) {
+          const det = DETOURS[d];
+          if (det) {
+            m.x = ox; m.y = oy;
+            for (const [dx, dy] of det) {
+              const tx = ox + dx;
+              const ty = oy + dy;
+              if (tx >= 0 && ty >= 0 && tx < N && ty < N && isRoom(mons, tx, ty, k)) {
+                m.x = tx; m.y = ty;
+                break;
+              }
+            }
+          }
         }
       }
-    }
-    return { dist, prev, start };
+      return ns;
+    };
   }
 
-  // 各マスに入るコスト。箱/敵は壊す（倒す）までの攻撃回数 + 1。
-  function costMap(g, monsterAt) {
-    const p = g.player;
-    const cost = new Float64Array(N * N);
-    for (let x = 0; x < N; x++) {
-      for (let y = 0; y < N; y++) {
-        const t = g.land[x][y];
-        const i = x * N + y;
-        const c = t.condition;
-        if (c === ROOM || c === STAIR) cost[i] = 1;
-        else if (c <= PURPLE_BOX) cost[i] = hitsToBreak(p.atk, t) + 1;
-        else if (c === WALL) {
-          cost[i] = p.condition === WALL_BREAK && !isEdge(x, y) ? hitsToBreak(p.atk, t) + 1 : Infinity;
-        } else if (c === ENEMY) {
-          const m = monsterAt.get(i);
-          cost[i] = m ? Math.ceil(m.hp / hitDamage(p.atk, m.def)) + 1 : 1;
-        } else cost[i] = 1;
+  // depth 手先まで全探索して、一番良い最初の一手を返す
+  function tactical(g, ctx) {
+    const { field, target, targetHits, local, cond, hpBudget, deathCost } = ctx;
+    const step = makeSim(g, local, cond, target, targetHits);
+    const near = local.filter((m) => cheb(m.x, m.y, g.player.x, g.player.y) <= 4).length;
+    const depth = local.length === 0 ? 1 : near > 6 ? 3 : 4;
+    const dmgW = 25 / Math.max(1, hpBudget);
+
+    const evalLeaf = (st, k) => {
+      if (st.dmgMax >= hpBudget) return deathCost + (depth - k) * -10;
+      let sc = st.dmg * dmgW - st.kills * ctx.killW;
+      if (st.done) return sc - 1000 + k;
+      sc += field[st.x * N + st.y] - st.hits;
+      return sc;
+    };
+    const rec = (st, k) => {
+      if (st.done || k === depth || st.dmgMax >= hpBudget) return evalLeaf(st, k);
+      let best = Infinity;
+      for (let s = 0; s < 8; s++) {
+        const ns = step(st, s);
+        if (!ns) continue;
+        const v = rec(ns, k + 1);
+        if (v < best) best = v;
       }
+      return best === Infinity ? evalLeaf(st, k) : best;
+    };
+    const root = {
+      x: g.player.x, y: g.player.y, turn: g.turn, mons: local,
+      dmg: 0, dmgMax: 0, hits: 0, kills: 0, done: false,
+    };
+    let best = null;
+    for (let s = 0; s < 8; s++) {
+      const ns = step(root, s);
+      if (!ns) continue;
+      const v = rec(ns, 1);
+      if (!best || v < best.v) best = { s, v };
     }
-    return cost;
-  }
-
-  // モンスターの周り（次の手で殴られうるマス）を通りにくくする
-  function addDanger(g, cost, living) {
-    const p = g.player;
-    for (const m of living) {
-      if (Math.max(Math.abs(m.x - p.x), Math.abs(m.y - p.y)) > 8) continue;
-      if (safeToFight(p, m, 0)) continue; // 安全に倒せる相手は怖くない
-      const danger = 2 + Math.ceil((hitDamage(m.atk, p.def) / Math.max(1, p.hp)) * 30);
-      for (let dx = -1; dx <= 1; dx++) {
-        for (let dy = -1; dy <= 1; dy++) {
-          const x = m.x + dx;
-          const y = m.y + dy;
-          if (x < 0 || y < 0 || x >= N || y >= N) continue;
-          const i = x * N + y;
-          if (cost[i] !== Infinity) cost[i] += danger;
-        }
-      }
-      // 敵のマス自体は倒しきれないなら実質通れない
-      cost[m.x * N + m.y] += 50;
-    }
-  }
-
-  function firstStep(path, target) {
-    let j = target;
-    while (path.prev[j] !== path.start && path.prev[j] !== -1) j = path.prev[j];
-    if (path.prev[j] === -1) return null;
-    return j;
-  }
-
-  function stepKeys(g, j) {
-    const dx = ((j / N) | 0) - g.player.x;
-    const dy = (j % N) - g.player.y;
-    const s = STEPS.find(([sx, sy]) => sx === dx && sy === dy);
-    return s ? s[2] : [];
+    return best;
   }
 
   function dungeonKeys(g) {
     const p = g.player;
     const ah = g.abilityHp;
+    if (g.floor !== lastFloor) { lastFloor = g.floor; floorTicks = 0; }
+    floorTicks++;
+
     const living = [];
-    const monsterAt = new Map();
-    for (let i = 0; i < g.monsterNumber; i++) {
-      const m = g.monsters[i];
-      if (m.alive) {
-        living.push(m);
-        monsterAt.set(m.x * N + m.y, m);
-      }
-    }
-    // 1 手で受けるおおよその最大ダメージ（隣接モンスター全員から）
+    for (let i = 0; i < g.monsterNumber; i++) if (g.monsters[i].alive) living.push(g.monsters[i]);
     const stealth = p.condition === STEALTH;
-    const near = stealth ? [] : living.filter((m) => Math.max(Math.abs(m.x - p.x), Math.abs(m.y - p.y)) <= 2);
-    const incoming = near.reduce((s, m) => s + hitDamage(m.atk, p.def), 0);
+    const lethal = (m) => maxDamage(m.atk, p.def) >= p.hp;
 
-    // --- 危ないときはコマンドを使う
-    if (p.hp <= incoming * 2 || p.hp <= p.maxHp / 4) {
-      if (ah[1] > 0 && p.hp < p.maxHp / 2) return ['X']; // Hp 全快
-      if (near.length >= 2 && ah[3] > 0) return ['D']; // モンスター箱化
-      if (near.length >= 1 && ah[0] > 0) return ['Z']; // 全体攻撃
-    }
-
-    const cost = costMap(g, monsterAt);
-    if (!stealth) addDanger(g, cost, living);
-    const path = dijkstra(g, cost);
-    const sx = (() => {
-      for (let x = 0; x < N; x++) for (let y = 0; y < N; y++) if (g.land[x][y].condition === STAIR) return x * N + y;
-      return -1;
-    })();
-    const stairDist = sx >= 0 ? path.dist[sx] : Infinity;
-
-    // ターンが足りなくなりそうなら「次の階へ」を使う
-    if (g.turn <= 3 && ah[4] > 0) return ['Enter'];
-    if (stairDist === Infinity && ah[4] > 0) return ['Enter'];
-
-    // --- 隣のモンスターは 1 撃で倒せるときだけ倒す。
-    // 倒しきれないと反撃を受けるので、それ以外は逃げる（敵はプレイヤーと同じ速さでしか追ってこない）
-    if (!stealth) {
-      let best = null;
-      for (const [dx, dy] of STEPS) {
-        const m = monsterAt.get((p.x + dx) * N + (p.y + dy));
-        if (!m) continue;
-        const hits = Math.ceil(m.hp / hitDamage(p.atk, m.def));
-        if (safeToFight(p, m, incoming) && (!best || hits < best.hits)) best = { hits, j: m.x * N + m.y };
-      }
-      if (best) return stepKeys(g, best.j);
-    }
-
-    // --- 目的地選び: (かかる手数) − (価値) が最小のマス
-    const turnGain = p.condition === TURN_CONST ? 0 : 10;
-    const hungry = g.turn < stairDist + 40; // ターンが心もとない
-    const hpRatio = p.hp / Math.max(1, p.maxHp);
-    let target = -1;
-    let bestScore = Infinity;
-    if (sx >= 0 && stairDist < Infinity) {
-      target = sx;
-      bestScore = stairDist - (hungry ? 0 : 25);
-    }
+    // ---- 地形とコスト
+    const values = boxValues(g);
+    const cond = new Int8Array(N * N);
+    const cost = new Float64Array(N * N);
+    const stop = new Uint8Array(N * N);
+    let stair = -1;
     for (let x = 0; x < N; x++) {
       for (let y = 0; y < N; y++) {
+        const t = g.land[x][y];
         const i = x * N + y;
-        const c = g.land[x][y].condition;
-        if (c > PURPLE_BOX || path.dist[i] === Infinity) continue;
-        let value = BOX_VALUE[c] + turnGain * (hungry ? 1.5 : 0.3);
-        if (c === BLUE_BOX && hpRatio < 0.5) value += 10;
-        if (c === RED_BOX && !hungry) continue;
-        const score = path.dist[i] - value;
-        if (score < bestScore) { bestScore = score; target = i; }
+        const c = t.condition;
+        cond[i] = c;
+        if (c === STAIR) { cost[i] = 1; stop[i] = 1; stair = i; }
+        else if (c <= PURPLE_BOX) {
+          // 箱は壊して進める。損な箱（赤箱など）は通り抜けるだけでも価値の分だけ重くする
+          cost[i] = hitsToBreak(p.atk, t) + 1 + Math.max(0, -values[c]);
+        } else if (c === WALL) cost[i] = p.condition === WALL_BREAK && !isEdge(x, y) ? hitsToBreak(p.atk, t) + 1 : Infinity;
+        else cost[i] = 1;
+      }
+    }
+    // モンスターの周りを通りにくくする（倒せる相手は軽く、即死級は重く）
+    if (!stealth) {
+      for (const m of living) {
+        if (cheb(m.x, m.y, p.x, p.y) > 20) continue;
+        const kill = Math.ceil(m.hp / avgDamage(p.atk, m.def));
+        const dmg = avgDamage(m.atk, p.def);
+        const danger = lethal(m) ? 30 : Math.min(30, ((kill - 1) * dmg / Math.max(1, p.hp)) * 20);
+        for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+            const x = m.x + dx;
+            const y = m.y + dy;
+            if (x < 0 || y < 0 || x >= N || y >= N) continue;
+            const i = x * N + y;
+            if (cost[i] !== Infinity) cost[i] += danger;
+          }
+        }
+        cost[m.x * N + m.y] += kill + danger;
       }
     }
 
-    if (target < 0) {
-      if (ah[2] > 0) return ['C']; // 全消去で道を開く
-      return [STEPS[(g.turn * 7) % 8][2]].flat();
+    const start = p.x * N + p.y;
+    const fwd = dijkstra(cost, stop, start, false);
+    const stairDist = stair >= 0 ? fwd.dist[stair] : Infinity;
+
+    // ---- 目的地選び: 箱は「寄り道の手数（箱経由で階段へ − 直接階段へ）− 価値」が一番小さいもの
+    const toStair = stair >= 0 ? dijkstra(cost, stop, stair, true).dist : null;
+    const base = stairDist < Infinity ? stairDist : 0;
+    let goal = -1;
+    let bestScore = Infinity;
+    if (stair >= 0 && stairDist < g.turn) {
+      goal = stair;
+      bestScore = 0;
     }
-    const j = firstStep(path, target);
-    return j === null ? [] : stepKeys(g, j);
+    const wallBreak = p.condition === WALL_BREAK;
+    for (let i = 0; i < N * N; i++) {
+      const c = cond[i];
+      if (c > PURPLE_BOX && !(wallBreak && c === WALL)) continue;
+      if (fwd.dist[i] >= g.turn) continue; // ターン切れ前に壊せる箱だけ
+      const after = toStair && toStair[i] < Infinity ? toStair[i] : base;
+      // 壁掘り中は壁も 1 枚 +10 ターン
+      const value = c === WALL ? values.turnGain : values[c];
+      const score = fwd.dist[i] + after - base - value;
+      if (score < bestScore) { bestScore = score; goal = i; }
+    }
+
+    // 近くの（先読みで動かす）モンスター
+    const local = [];
+    if (!stealth) {
+      for (let i = 0; i < g.monsterNumber; i++) {
+        const m = g.monsters[i];
+        if (!m.alive || cheb(m.x, m.y, p.x, p.y) > SEARCH_RADIUS) continue;
+        local.push({
+          x: m.x, y: m.y, hp: m.hp, def: m.def, exp: m.exp, alive: true, ability: m.ability,
+          avg: avgDamage(m.atk, p.def), max: maxDamage(m.atk, p.def),
+        });
+        cond[m.x * N + m.y] = ROOM; // 先読みではモンスター側の座標で管理する
+      }
+    }
+
+    // 行き先が無い（階段に届かずターンも足りない）→ 次の階へ / 全消去
+    if (goal < 0) {
+      if (ah[4] > 0) return ['Enter'];
+      if (ah[2] > 0) return ['C'];
+      return STEPS[(g.turn * 7) % 8][2];
+    }
+
+    // 途中に箱があるなら、まず手前の箱が当面の目標
+    let target = goal;
+    for (let j = goal; j !== start && j >= 0; j = fwd.prev[j]) {
+      if (j !== goal && (cond[j] <= PURPLE_BOX || cond[j] === WALL)) target = j;
+    }
+    const targetHits = cond[target] <= PURPLE_BOX || cond[target] === WALL ? hitsToBreak(p.atk, g.land[(target / N) | 0][target % N]) : 1;
+    const field = dijkstra(cost, stop, target, true).dist;
+    for (let i = 0; i < N * N; i++) if (field[i] === Infinity) field[i] = 5000;
+
+    const hpBudget = p.hp;
+    const deathCost = ah[5] > 0 ? 3000 : DEATH;
+    const killW = 2;
+    const best = tactical(g, { field, target, targetHits, local, cond, hpBudget, deathCost, killW });
+
+    // ---- 避けきれない（死ぬ）ならコマンドで切り抜ける
+    const doomed = !best || best.v >= deathCost - 100;
+    const hurt = p.hp < p.maxHp * 0.35;
+    const threatened = local.some((m) => cheb(m.x, m.y, p.x, p.y) <= 2);
+    if (doomed || (hurt && threatened)) {
+      if (ah[1] > 0 && p.hp < p.maxHp * 0.6 && !local.some((m) => m.max >= p.maxHp)) return ['X'];
+      if (ah[4] > 0 && doomed) return ['Enter'];
+      if (ah[3] > 0 && doomed) return ['D'];
+      if (ah[2] > 0 && doomed) return ['C'];
+      if (ah[0] > 0 && doomed) return ['Z'];
+    }
+    if (!best) return STEPS[(g.turn * 7) % 8][2];
+    return STEPS[best.s][2];
   }
 
   return {
@@ -259,6 +418,7 @@ export function createAutoPlayer() {
         case DUNGEON:
           return g.player.alive ? dungeonKeys(g) : [];
         case ENTRANCE:
+        case OPTIONS:
           if (--wait > 0) return [];
           return ['Enter'];
         case GAME_OVER:
@@ -267,9 +427,6 @@ export function createAutoPlayer() {
         case MUSEUM:
           if (--wait > 0) return [];
           return ['X'];
-        case OPTIONS:
-          if (--wait > 0) return [];
-          return ['Enter'];
         default:
           return [];
       }
