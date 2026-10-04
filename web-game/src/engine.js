@@ -12,6 +12,7 @@ import {
 } from './constants.js';
 import { cLng, vbInt, rnd } from './vb.js';
 import { getPixel } from './bmp.js';
+import { generateFloor } from './mapgen.js';
 
 const LIMIT_9 = 10 ** 9 - 1;
 const LIMIT_7 = 10 ** 7 - 1;
@@ -417,7 +418,9 @@ export function floorSet() {
       return; // port: VB6 はこの後も裏でマップを作るが、画面には出ないので省略
   }
 
-  mapSet();
+  // arrange: フロアをランダムに作る（VB6 版は Map40.bmp の 64 枚から選ぶ）
+  const gen = g.arrange ? generateFloor(g.floor) : null;
+  mapSet(gen);
 
   // VB6 は「ランダムなマスを引いて床ならそこに置く」を繰り返す。
   // 空き床から一様に選ぶのと同じ分布なので、候補リストから引く形にした。
@@ -427,6 +430,7 @@ export function floorSet() {
       if (g.land[x][y].condition === ROOM) rooms.push(g.land[x][y]);
     }
   }
+  if (gen) placeGenerated(gen, rooms);
   const take = () => {
     if (rooms.length === 0) return null;
     const k = vbInt(rnd() * rooms.length);
@@ -437,7 +441,7 @@ export function floorSet() {
   };
 
   // プレイヤー
-  const pt = take();
+  const pt = gen ? null : take();
   if (pt) {
     p.x = p.ox = pt.x;
     p.y = p.oy = pt.y;
@@ -447,9 +451,9 @@ export function floorSet() {
   p.condition = NO_ABILITY;
 
   // 階段・紫箱
-  const st = take();
+  const st = gen ? null : take();
   if (st) st.condition = STAIR;
-  const pb = take();
+  const pb = gen ? null : take();
   if (pb) pb.condition = PURPLE_BOX;
 
   // モンスター
@@ -470,8 +474,23 @@ export function floorSet() {
 
   if (g.floor >= 2) statusCheck(true);
   emit('floor', { floor: g.floor });
+  if (gen?.text) g.words[1] = gen.text;
   // arrange: 10 階を越えるごとに祝福を 1 つ選ぶ
   if (g.arrange && g.floor > 1 && g.floor % 10 === 1) blessingSet();
+}
+
+// arrange: ランダム生成したフロアでは、プレイヤーは決められたスタート地点に立つ
+// （階段と紫箱は generateFloor() が置き済み）。モンスターはスタート地点の近くには置かない。
+function placeGenerated(gen, rooms) {
+  const p = g.player;
+  p.x = p.ox = gen.x;
+  p.y = p.oy = gen.y;
+  g.land[gen.x][gen.y].alive = false;
+  const far = rooms.filter((t) => Math.max(Math.abs(t.x - gen.x), Math.abs(t.y - gen.y)) > gen.safe);
+  // 遠いマスだけでは置ききれないほどモンスターが多い階は、スタート地点以外のどこにでも置く
+  const keep = far.length >= g.monsterNumber ? far : rooms.filter((t) => t.x !== gen.x || t.y !== gen.y);
+  rooms.length = 0;
+  rooms.push(...keep);
 }
 
 // ---------------------------------------------------------------- 祝福（アレンジルール）
@@ -766,18 +785,20 @@ function matchColor(z) {
   return best >= 0 ? COLOR_TO_CONDITION[best] : ROOM;
 }
 
-function mapSet() {
+function mapSet(gen) {
   const m0 = g.monsters[0];
   let ox = 0;
   let oy = 0;
-  if (mapImage) {
+  if (mapImage && !gen) {
     ox = vbInt(rnd() * vbInt(mapImage.width / LAND_NUMBER)) * LAND_NUMBER;
     oy = vbInt(rnd() * vbInt(mapImage.height / LAND_NUMBER)) * LAND_NUMBER;
   }
   for (let x = 0; x < LAND_NUMBER; x++) {
     for (let y = 0; y < LAND_NUMBER; y++) {
       const t = g.land[x][y];
-      if (mapImage) {
+      if (gen) {
+        t.condition = gen.cond[x * LAND_NUMBER + y];
+      } else if (mapImage) {
         t.condition = matchColor(getPixel(mapImage, ox + x, oy + y));
       } else {
         t.condition = isEdge(x, y) ? WALL : ROOM;
@@ -1329,12 +1350,12 @@ const HOWTO_PAGES = [
   [
     'How to play\n7/7',
     'ブラウザ版のアレンジ要素\n',
+    'ダンジョン・・・フロアの形と箱の並びが毎回変わります。\n序盤は青箱や緑箱が多く、深い階ほど赤箱が増えます。',
     '祝福・・・10階を越えるごとに、3つの祝福から1つを選べます。\n(左右キーで選択、Enterキーで決定)',
-    'Optionでルールを「オリジナル」にすると、祝福は現れません。\n',
+    'Optionでルールを「オリジナル」にすると、元のダンジョンになり、\n祝福も現れません。',
     '記録と称号\n',
     '冒険が終わると、到達した階が記録の部屋に残ります。\n最も深く潜った階に応じて称号が付きます。',
     '画面右下には攻撃力・守備力と、\nモンスターの強さが表示されています。',
-    '\n',
     `\n${BACK_HELP}`,
   ],
 ];
@@ -1389,7 +1410,7 @@ export function wordSet() {
       w[0] = 'Options\n';
       w[1] = `${DIFFICULTY_NAMES[p.ability]}\n`;
       w[2] = '低い難易度ほど紫箱で良い効果が出やすいです。\n';
-      w[3] = `ルール: ${g.arrange ? 'アレンジ' : 'オリジナル'}\n${g.arrange ? '10階を越えるごとに祝福を選べます。' : 'VB6版そのままのルールです。'}\n`;
+      w[3] = `ルール: ${g.arrange ? 'アレンジ' : 'オリジナル'}\n${g.arrange ? 'ダンジョンが毎回変わり、10階ごとに祝福を選べます。' : 'VB6版そのままのルールです。'}\n`;
       w[4] = 'xキーでメニュー画面に戻る\n左右キーで難易度選択,上下キーでルール選択\nEnterキーでダンジョンに入る。';
       for (let i = 5; i <= 8; i++) w[i] = '';
       break;

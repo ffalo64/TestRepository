@@ -5,8 +5,10 @@ import { fileURLToPath } from 'node:url';
 import { decodeBmp } from '../src/bmp.js';
 import { cLng, setRandom, mulberry32 } from '../src/vb.js';
 import { initGame, keyDown, tick, g } from '../src/engine.js';
+import { generateFloor } from '../src/mapgen.js';
 import {
   ENTRANCE, DUNGEON, GAME_OVER, GAME_CLEAR, MUSEUM, BLESSING, STAIR, ENEMY, LAND_NUMBER,
+  BLUE_BOX, RED_BOX, YELLOW_BOX, GREEN_BOX, PURPLE_BOX, WALL, ROOM,
 } from '../src/constants.js';
 
 const SEEDS = Number(process.argv[2] ?? 20);
@@ -25,6 +27,57 @@ const clngCases = [[2.5, 2], [3.5, 4], [17.500000000000004, 18], [-0.5, 0], [1.4
 for (const [inp, exp] of clngCases) {
   const got = z(cLng(inp));
   if (got !== exp) fail(`cLng(${inp}) = ${got}, expected ${exp}`);
+}
+
+// ---- ランダム生成フロアの決まりごと（紫箱と階段が 1 個ずつあり、赤箱を壊さずに辿り着ける）
+function checkFloor(gen, ctx) {
+  const N = LAND_NUMBER;
+  const c = gen.cond;
+  const count = (v) => c.reduce((n, x) => n + (x === v ? 1 : 0), 0);
+  if (count(STAIR) !== 1) fail(`${ctx}: 階段が ${count(STAIR)} 個`);
+  if (count(PURPLE_BOX) !== 1) fail(`${ctx}: 紫箱が ${count(PURPLE_BOX)} 個`);
+  for (let k = 0; k < N; k++) {
+    if (c[k] !== WALL || c[(N - 1) * N + k] !== WALL || c[k * N] !== WALL || c[k * N + N - 1] !== WALL) {
+      fail(`${ctx}: 外周が壁でない`);
+      break;
+    }
+  }
+  const start = gen.x * N + gen.y;
+  if (c[start] !== ROOM) fail(`${ctx}: スタート地点が床でない (${c[start]})`);
+  // 床と赤以外の箱だけを通る 8 方向の探索。階段・紫箱には入れるが、その先へは進まない
+  const seen = new Uint8Array(N * N);
+  const queue = [start];
+  seen[start] = 1;
+  for (let k = 0; k < queue.length; k++) {
+    const i = queue[k];
+    if (c[i] === STAIR || c[i] === PURPLE_BOX) continue;
+    for (const d of [-N - 1, -N, -N + 1, -1, 1, N - 1, N, N + 1]) {
+      const j = i + d;
+      if (!seen[j] && c[j] !== WALL && c[j] !== RED_BOX) { seen[j] = 1; queue.push(j); }
+    }
+  }
+  if (!seen[c.indexOf(STAIR)]) fail(`${ctx}: 階段に辿り着けない`);
+  if (!seen[c.indexOf(PURPLE_BOX)]) fail(`${ctx}: 紫箱に辿り着けない`);
+  return { red: count(RED_BOX), boxes: count(BLUE_BOX) + count(RED_BOX) + count(YELLOW_BOX) + count(GREEN_BOX) };
+}
+
+{
+  setRandom(mulberry32(12345));
+  const bands = [[1, 10], [11, 30], [31, 100], [101, 999]];
+  const ratios = bands.map(([from, to]) => {
+    let red = 0;
+    let boxes = 0;
+    for (let k = 0; k < 400; k++) {
+      const floor = from + (k % (to - from + 1));
+      const r = checkFloor(generateFloor(floor), `generateFloor(${floor}) #${k}`);
+      red += r.red;
+      boxes += r.boxes;
+    }
+    return red / boxes;
+  });
+  console.log('赤箱の割合 ' + bands.map(([from, to], k) => `${from}-${to}F: ${(ratios[k] * 100).toFixed(0)}%`).join(', '));
+  if (!(ratios[0] < 0.1)) fail(`序盤の赤箱が多すぎる (${ratios[0]})`);
+  if (!(ratios[0] < ratios[1] && ratios[1] < ratios[2])) fail(`赤箱の割合が階層とともに増えていない (${ratios})`);
 }
 
 const isInt = (v) => Number.isInteger(v);
