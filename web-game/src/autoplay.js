@@ -35,6 +35,7 @@ const DETOURS = {
 const CMD_VALUE = [10, 25, 50, 30, 60, 120];
 const SEARCH_RADIUS = 9; // これより遠いモンスターは先読みでは動かないものとして扱う
 const DEATH = 1e5;
+const TURN_ENOUGH = 2000; // 残りターンがこれだけあれば十分。ターン目当てで箱を壊すのをやめる
 const STALL_SOFT = 6; // これだけ進展が無ければ「敵を待って倒す」のをやめる
 const STALL_HARD = 20; // これだけ進展が無ければコマンドで打開する
 
@@ -130,8 +131,8 @@ export function createAutoPlayer() {
     if (g.turn < 150) return 2;
     if (g.turn < 400) return 1;
     if (g.turn < 1500) return 0.5;
-    if (g.turn < 5000) return 0.2;
-    return 0.05;
+    if (g.turn < TURN_ENOUGH) return 0.2;
+    return 0; // これ以上はターンを稼がない
   }
 
   // 1 手使うことの重さ。ターンが余っているほど軽い（= 遠くの箱も取りに行く）
@@ -164,7 +165,8 @@ export function createAutoPlayer() {
     const green = (hpLost * 40 + 15 + 10 + 10 + 10 + 15 + 5 + 5 + 3 + 3 + 5 + 3 + 5 + 10) / 15 + 5;
     return {
       turnGain: gain,
-      [BLUE_BOX]: 2 + hpLost * 30 + gain,
+      // 青箱は回復とターンだけ。ターンが足りていて Hp も減っていなければ壊しに行かない
+      [BLUE_BOX]: (g.turn < TURN_ENOUGH ? 2 : 0) + hpLost * 30 + gain,
       // 赤箱は取り返しのつかない効果が多い。ターンが尽きそうなときだけ妥協する
       [RED_BOX]: -60 - (p.hp / Math.max(1, p.maxHp)) * 10 + (g.turn < 60 ? 60 : 0) + gain,
       [YELLOW_BOX]: yellow + gain,
